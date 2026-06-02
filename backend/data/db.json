@@ -1,0 +1,163 @@
+{
+  "users": [
+    {
+      "id": "u1",
+      "username": "admin",
+      "email": "admin@booking.local",
+      "password": "$2a$10$bTut1Xd6uNOZXx8JKp32YuZWI063a0LcRzS5QykxJpIgz1CA.fY62",
+      "name": "ผู้ดูแลระบบ (Admin)",
+      "role": "admin",
+      "status": "active",
+      "createdAt": "2026-05-28T21:51:40+07:00"
+    },
+    {
+      "id": "u2",
+      "username": "scheduler",
+      "email": "scheduler@booking.local",
+      "password": "$2a$10$bTut1Xd6uNOZXx8JKp32YuZWI063a0LcRzS5QykxJpIgz1CA.fY62",
+      "name": "เจ้าหน้าที่จัดคิวรถ (Scheduler)",
+      "role": "scheduler",
+      "status": "active",
+      "createdAt": "2026-05-28T21:51:40+07:00"
+    },
+    {
+      "id": "u3",
+      "username": "user",
+      "email": "user@booking.local",
+      "password": "$2a$10$bTut1Xd6uNOZXx8JKp32YuZWI063a0LcRzS5QykxJpIgz1CA.fY62",
+      "name": "พนักงานทั่วไป (User)",
+      "role": "user",
+      "status": "active",
+      "createdAt": "2026-05-28T21:51:40+07:00"
+    }
+  ],
+  "cars": [
+    {
+      "id": "car1",
+      "model": "รถตู้ ฮร 8010",
+      "color": "สีขาว",
+      "type": "van",
+      "status": "available",
+      "image": "van_white"
+    },
+    {
+      "id": "car2",
+      "model": "รถตู้ ฮย 1906",
+      "color": "สีเทา",
+      "type": "van",
+      "status": "available",
+      "image": "van_grey"
+    },
+    {
+      "id": "car3",
+      "model": "รถยาริส ฌอ 6249",
+      "color": "สีเทา",
+      "type": "sedan",
+      "status": "available",
+      "image": "yaris_grey"
+    },
+    {
+      "id": "car4",
+      "model": "รถเชฟ ศฐ 8709",
+      "color": "สีดำ",
+      "type": "suv",
+      "status": "available",
+      "image": "chevrolet_black"
+    },
+    {
+      "id": "car5",
+      "model": "รถอัลพาร์ด 8กว 6276",
+      "color": "สีขาว",
+      "type": "luxury",
+      "status": "available",
+      "image": "alphard_white"
+    }
+  ],
+  "bookings": [
+    {
+      "id": "b_1780401289688",
+      "userId": "u1",
+      "carId": "car1",
+      "startTime": "2026-06-02T09:00",
+      "endTime": "2026-06-02T11:00",
+      "purpose": "พาคู่ค้าดูงาน",
+      "destination": "โรงแรม",
+      "passengers": 1,
+      "status": "approved",
+      "notes": "ได้",
+      "approvedBy": "ผู้ดูแลระบบ (Admin)",
+      "createdAt": "2026-06-02T11:54:49.693Z"
+    }
+  ],
+  "notificationLogs": [
+    {
+      "id": "log_1780401310608_72gznv8w5",
+      "timestamp": "2026-06-02T11:55:10.608Z",
+      "type": "line",
+      "recipient": "u1",
+      "subject": "✅ คำขอจองรถยนต์ได้รับการอนุมัติ",
+      "message": "รถ: รถตู้ ฮร 8010\nเวลา: 2/6/2569 09:00:00\nผู้อนุมัติ: ผู้ดูแลระบบ (Admin)\nหมายเหตุ: ได้",
+      "status": "simulated"
+    },
+    {
+      "id": "log_1780401310607_am91rqnv7",
+      "timestamp": "2026-06-02T11:55:10.607Z",
+      "type": "email",
+      "recipient": "admin@booking.local",
+      "subject": "คำขอจองรถยนต์ของคุณได้รับการอนุมัติแล้ว",
+      "message": "ยินดีด้วย! คำขอจองรถยนต์ รถตู้ ฮร 8010 (สีขาว)\nวันเวลา: 2/6/2569 09:00:00 - 2/6/2569 11:00:00\nวัตถุประสงค์: พาคู่ค้าดูงาน\nได้รับการอนุมัติแล้วโดย ผู้ดูแลระบบ (Admin)\nหมายเหตุ: ได้",
+      "status": "simulated"
+    },
+    {
+      "id": "log_1780401290009_08ki8yscf",
+      "timestamp": "2026-06-02T11:54:50.009Z",
+      "type": "line",
+      "recipient": "u2",
+      "subject": "🚗 คำขอจองรถยนต์ใหม่ (รออนุมัติ)",
+      "message": "ผู้ขอ: ผู้ดูแลระบบ (Admin)\nรถ: รถตู้ ฮร 8010\nเวลา: 2/6/2569 09:00:00 ถึง 2/6/2569 11:00:00\nวัตถุประสงค์: พาคู่ค้าดูงาน\nไปที่: โรงแรม",
+      "status": "simulated"
+    },
+    {
+      "id": "log_1780401290009_caxkzp6hu",
+      "timestamp": "2026-06-02T11:54:50.009Z",
+      "type": "email",
+      "recipient": "scheduler@booking.local",
+      "subject": "คำขอจองรถยนต์ใหม่รอการอนุมัติ",
+      "message": "ผู้ขอจอง: ผู้ดูแลระบบ (Admin)\nรถยนต์: รถตู้ ฮร 8010 (สีขาว)\nวันเวลา: 2/6/2569 09:00:00 - 2/6/2569 11:00:00\nวัตถุประสงค์: พาคู่ค้าดูงาน\nสถานที่: โรงแรม\n\nกรุณาเข้าสู่ระบบเพื่อจัดการอนุมัติคำขอ",
+      "status": "simulated"
+    },
+    {
+      "id": "log_1780401290009_sfeep6vre",
+      "timestamp": "2026-06-02T11:54:50.009Z",
+      "type": "line",
+      "recipient": "u1",
+      "subject": "🚗 คำขอจองรถยนต์ใหม่ (รออนุมัติ)",
+      "message": "ผู้ขอ: ผู้ดูแลระบบ (Admin)\nรถ: รถตู้ ฮร 8010\nเวลา: 2/6/2569 09:00:00 ถึง 2/6/2569 11:00:00\nวัตถุประสงค์: พาคู่ค้าดูงาน\nไปที่: โรงแรม",
+      "status": "simulated"
+    },
+    {
+      "id": "log_1780401290009_586x248fy",
+      "timestamp": "2026-06-02T11:54:50.009Z",
+      "type": "email",
+      "recipient": "admin@booking.local",
+      "subject": "คำขอจองรถยนต์ใหม่รอการอนุมัติ",
+      "message": "ผู้ขอจอง: ผู้ดูแลระบบ (Admin)\nรถยนต์: รถตู้ ฮร 8010 (สีขาว)\nวันเวลา: 2/6/2569 09:00:00 - 2/6/2569 11:00:00\nวัตถุประสงค์: พาคู่ค้าดูงาน\nสถานที่: โรงแรม\n\nกรุณาเข้าสู่ระบบเพื่อจัดการอนุมัติคำขอ",
+      "status": "simulated"
+    }
+  ],
+  "settings": {
+    "smtp": {
+      "host": "",
+      "port": "587",
+      "secure": false,
+      "user": "",
+      "pass": "",
+      "from": "noreply@carbooking.com"
+    },
+    "line": {
+      "channelAccessToken": "",
+      "channelSecret": "",
+      "adminUserId": ""
+    }
+  }
+}
