@@ -490,7 +490,7 @@ export default function App() {
                 <input
                   type="text"
                   className="input-field"
-                  placeholder="admin / user / scheduler"
+                  placeholder="ระบุชื่อผู้ใช้งาน หรือ อีเมล"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   required
@@ -518,15 +518,6 @@ export default function App() {
                 <span onClick={() => { setAuthView('register'); setErrorMsg(''); }} style={{ color: 'var(--primary)', cursor: 'pointer', fontWeight: '600' }}>
                   ลงทะเบียนขอสิทธิ์ใช้งาน
                 </span>
-              </div>
-
-              <div className="glass-panel" style={{ marginTop: '24px', padding: '16px', background: 'rgba(255, 255, 255, 0.02)', fontSize: '0.85rem' }}>
-                <p style={{ fontWeight: '600', marginBottom: '8px', color: 'var(--primary)' }}>🔑 บัญชีทดสอบสำหรับการสาธิต:</p>
-                <ul style={{ listStyleType: 'none', paddingLeft: '0', display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-muted)' }}>
-                  <li>👤 <strong>Admin:</strong> <code>admin</code> / password123</li>
-                  <li>📅 <strong>Scheduler:</strong> <code>scheduler</code> / password123</li>
-                  <li>🚗 <strong>User:</strong> <code>user</code> / password123</li>
-                </ul>
               </div>
             </form>
           ) : (

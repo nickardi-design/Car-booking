@@ -359,9 +359,9 @@ const initPostgresDB = async () => {
     const usersCheck = await client.query('SELECT COUNT(*) FROM users');
     if (parseInt(usersCheck.rows[0].count) === 0) {
       console.log('Seeding default users into PostgreSQL...');
-      // generate standard bcrypt for password123
+      // generate standard bcrypt for CarBookingSecurePass2026!
       const salt = bcrypt.genSaltSync(10);
-      const hash = bcrypt.hashSync('password123', salt);
+      const hash = bcrypt.hashSync('CarBookingSecurePass2026!', salt);
       
       const defaultUsers = [
         ['u1', 'admin', 'admin@booking.local', hash, 'ผู้ดูแลระบบ (Admin)', 'admin', 'active'],
