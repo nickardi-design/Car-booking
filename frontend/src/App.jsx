@@ -298,9 +298,9 @@ export default function App() {
 
   // Admin/Scheduler Approve Booking
   const handleApproveBooking = async (id) => {
-    const notes = prompt('ใส่หมายเหตุการอนุมัติ (ตัวเลือก):') || '';
+    if (!window.confirm('กรุณาตรวจสอบความถูกต้องของข้อมูล')) return;
     try {
-      const res = await api.approveBooking(id, notes);
+      const res = await api.approveBooking(id, '');
       addToast(res.message, 'success');
       fetchDashboardData();
     } catch (err) {
