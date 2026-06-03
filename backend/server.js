@@ -13,7 +13,7 @@ const { Pool } = pkg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DB_FILE = path.join(__dirname, 'data', 'db.json');
-const JWT_SECRET = 'car_booking_jwt_super_secret_key_2026';
+const JWT_SECRET = process.env.JWT_SECRET || 'car_booking_jwt_super_secret_key_2026';
 
 const app = express();
 app.use(cors());
