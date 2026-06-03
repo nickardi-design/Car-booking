@@ -373,6 +373,7 @@ const initPostgresDB = async () => {
           'INSERT INTO users (id, username, email, password, name, role, status) VALUES ($1, $2, $3, $4, $5, $6, $7)',
           u
         );
+      }
     } else {
       // If users table is not empty, update the passwords of the default accounts to the new secure password
       const salt = bcrypt.genSaltSync(10);
