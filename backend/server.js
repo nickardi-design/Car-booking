@@ -731,9 +731,9 @@ app.get('/api/bookings', authenticateToken, async (req, res) => {
 
 // Create booking
 app.post('/api/bookings', authenticateToken, async (req, res) => {
-  const { carId, startTime, endTime, purpose, destination, passengers } = req.body;
+  const { carId, startTime, endTime, purpose } = req.body;
 
-  if (!carId || !startTime || !endTime || !purpose || !destination) {
+  if (!carId || !startTime || !endTime || !purpose) {
     return res.status(400).json({ message: 'กรุณากรอกข้อมูลการจองให้ครบถ้วน' });
   }
 
@@ -759,8 +759,8 @@ app.post('/api/bookings', authenticateToken, async (req, res) => {
       startTime,
       endTime,
       purpose,
-      destination,
-      passengers: parseInt(passengers || '1'),
+      destination: '',
+      passengers: 1,
       status: 'pending',
       notes: '',
       approvedBy: '',
@@ -777,13 +777,13 @@ app.post('/api/bookings', authenticateToken, async (req, res) => {
         'email',
         approver.email,
         'คำขอจองรถยนต์ใหม่รอการอนุมัติ',
-        `ผู้ขอจอง: ${req.user.name}\nรถยนต์: ${car.model} (${car.color})\nวันเวลา: ${formatThaiDateTime(startTime)} - ${formatThaiDateTime(endTime)}\nวัตถุประสงค์: ${purpose}\nสถานที่: ${destination}\n\nกรุณาเข้าสู่ระบบเพื่อจัดการอนุมัติคำขอ`
+        `ผู้ขอจอง: ${req.user.name}\nรถยนต์: ${car.model} (${car.color})\nวันเวลา: ${formatThaiDateTime(startTime)} - ${formatThaiDateTime(endTime)}\nวัตถุประสงค์: ${purpose}\n\nกรุณาเข้าสู่ระบบเพื่อจัดการอนุมัติคำขอ`
       );
       await sendNotification(
         'line',
         approver.id,
         '🚗 คำขอจองรถยนต์ใหม่ (รออนุมัติ)',
-        `ผู้ขอ: ${req.user.name}\nรถ: ${car.model}\nเวลา: ${formatThaiDateTime(startTime)} ถึง ${formatThaiDateTime(endTime)}\nวัตถุประสงค์: ${purpose}\nไปที่: ${destination}`
+        `ผู้ขอ: ${req.user.name}\nรถ: ${car.model}\nเวลา: ${formatThaiDateTime(startTime)} ถึง ${formatThaiDateTime(endTime)}\nวัตถุประสงค์: ${purpose}`
       );
     }
 

@@ -1,4 +1,11 @@
-const API_URL = 'http://localhost:5000/api';
+const getBaseApiUrl = () => {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (!envUrl) return 'http://localhost:5000/api';
+  const cleanedUrl = envUrl.endsWith('/') ? envUrl.slice(0, -1) : envUrl;
+  return `${cleanedUrl}/api`;
+};
+
+const API_URL = getBaseApiUrl();
 
 // Get stored token
 export const getToken = () => localStorage.getItem('booking_token');
@@ -185,26 +192,46 @@ export const getCarIcon = (type) => {
   }
 };
 
-export const generateGoogleCalendarLink = (booking) => {
-  const formatTime = (isoString) => {
-    // Format: YYYYMMDDTHHmmss
+export const generateICSFileLink = (booking) => {
+  const formatTimeICS = (isoString) => {
+    if (!isoString) return '';
     const date = new Date(isoString);
     const pad = (num) => String(num).padStart(2, '0');
     
-    const y = date.getFullYear();
-    const m = pad(date.getMonth() + 1);
-    const d = pad(date.getDate());
-    const h = pad(date.getHours());
-    const min = pad(date.getMinutes());
+    const y = date.getUTCFullYear();
+    const m = pad(date.getUTCMonth() + 1);
+    const d = pad(date.getUTCDate());
+    const h = pad(date.getUTCHours());
+    const min = pad(date.getUTCMinutes());
+    const s = pad(date.getUTCSeconds());
     
-    return `${y}${m}${d}T${h}${min}00`;
+    return `${y}${m}${d}T${h}${min}${s}Z`;
   };
 
+  const start = formatTimeICS(booking.startTime);
+  const end = formatTimeICS(booking.endTime);
+  const now = formatTimeICS(new Date().toISOString());
+  
   const title = `🚗 จองรถ: ${booking.carModel}`;
-  const dates = `${formatTime(booking.startTime)}/${formatTime(booking.endTime)}`;
-  const details = `วัตถุประสงค์: ${booking.purpose}\nผู้เดินทาง: ${booking.userName} (${booking.passengers} คน)\nผู้อนุมัติ: ${booking.approvedBy || 'ไม่ระบุ'}`;
-  const location = booking.destination;
+  const details = `วัตถุประสงค์: ${booking.purpose}\\nผู้จอง: ${booking.userName}\\nผู้อนุมัติ: ${booking.approvedBy || 'ไม่ระบุ'}`;
 
-  return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${dates}&details=${encodeURIComponent(details)}&location=${encodeURIComponent(location)}`;
+  const icsLines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Antigravity Car Booking//NONSGML v1.0//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'BEGIN:VEVENT',
+    `UID:booking_${booking.id}@carbooking.local`,
+    `DTSTAMP:${now}`,
+    `DTSTART:${start}`,
+    `DTEND:${end}`,
+    `SUMMARY:${title}`,
+    `DESCRIPTION:${details}`,
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ];
+
+  const icsContent = icsLines.join('\r\n');
+  return `data:text/calendar;charset=utf-8,${encodeURIComponent(icsContent)}`;
 };
-

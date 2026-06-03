@@ -1,0 +1,17 @@
+git init
+git add .
+git commit -m "initial commit"
+git branch -M main
+git remote add origin https://github.com/nickardi-design/Car-booking.git
+git push -u origin main
+
+
+git config --global user.email "nickardi@gmail.com"
+
+git config --global user.name "nickardi"
+
+
+พาสฐานข้อมูล supabase TlQyeXOd09r9ZZZx
+
+
+postgresql://postgres:[TlQyeXOd09r9ZZZx]@db.ydpprhnpmyyaxqmxiamw.supabase.co:5432/postgres

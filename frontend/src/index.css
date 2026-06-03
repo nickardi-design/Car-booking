@@ -586,6 +586,8 @@ body {
 .modal-content {
   width: 100%;
   max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
   animation: scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -761,3 +763,11 @@ body {
   from { transform: translateX(100%); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
+
+/* Custom Calendar Day Hover Style */
+.calendar-day-hover:hover {
+  background: rgba(99, 102, 241, 0.15) !important;
+  color: var(--primary) !important;
+  transform: scale(1.1);
+}
+

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api, formatThaiDate, formatThaiDateTime, getCarIcon, generateGoogleCalendarLink } from './utils/api';
+import { api, logout, formatThaiDate, formatThaiDateTime, getCarIcon, generateICSFileLink } from './utils/api';
 
 export default function App() {
   // Theme state
@@ -42,8 +42,42 @@ export default function App() {
   const [bookingStart, setBookingStart] = useState('');
   const [bookingEnd, setBookingEnd] = useState('');
   const [bookingPurpose, setBookingPurpose] = useState('');
-  const [bookingDestination, setBookingDestination] = useState('');
-  const [bookingPassengers, setBookingPassengers] = useState(1);
+  
+  // Custom Thai Date States for independent visual inline calendar selection (วัน เดือน ปี พ.ศ.)
+  const [bookingDate, setBookingDate] = useState(new Date().toISOString().split('T')[0]);
+  const [calMonth, setCalMonth] = useState(new Date().getMonth());
+  const [calYearBE, setCalYearBE] = useState(new Date().getFullYear() + 543);
+
+  const THAI_MONTHS = [
+    'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+    'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+  ];
+
+  const formatThaiFullDate = (dateStr) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return '';
+    const days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+    return `วัน${days[date.getDay()]}ที่ ${date.getDate()} ${THAI_MONTHS[date.getMonth()]} พ.ศ. ${date.getFullYear() + 543}`;
+  };
+
+  const handlePrevMonth = () => {
+    if (calMonth === 0) {
+      setCalMonth(11);
+      setCalYearBE(prev => prev - 1);
+    } else {
+      setCalMonth(prev => prev - 1);
+    }
+  };
+
+  const handleNextMonth = () => {
+    if (calMonth === 11) {
+      setCalMonth(0);
+      setCalYearBE(prev => prev + 1);
+    } else {
+      setCalMonth(prev => prev + 1);
+    }
+  };
   
   // Toast notifications
   const [toasts, setToasts] = useState([]);
@@ -143,6 +177,27 @@ export default function App() {
     }
   }, [activeTab]);
 
+  const handleOpenBookingModal = (car) => {
+    setSelectedCar(car);
+    setBookingStart('08:00');
+    setBookingEnd('09:00');
+    
+    const d = new Date(selectedDate);
+    if (!isNaN(d.getTime())) {
+      setBookingDate(selectedDate);
+      setCalMonth(d.getMonth());
+      setCalYearBE(d.getFullYear() + 543);
+    } else {
+      const today = new Date();
+      const dateStr = today.toISOString().split('T')[0];
+      setBookingDate(dateStr);
+      setCalMonth(today.getMonth());
+      setCalYearBE(today.getFullYear() + 543);
+    }
+    
+    setShowBookingModal(true);
+  };
+
   // --- ACTIONS ---
 
   const handleLogin = async (e) => {
@@ -187,7 +242,7 @@ export default function App() {
   const handleLogout = () => {
     setUser(null);
     setToken('');
-    api.logout();
+    logout();
     addToast('ออกจากระบบเรียบร้อยแล้ว', 'info');
   };
 
@@ -196,8 +251,8 @@ export default function App() {
     e.preventDefault();
     setLoading(true);
     try {
-      const startDateTime = `${selectedDate}T${bookingStart}`;
-      const endDateTime = `${selectedDate}T${bookingEnd}`;
+      const startDateTime = `${bookingDate}T${bookingStart}`;
+      const endDateTime = `${bookingDate}T${bookingEnd}`;
       
       // Basic check
       if (new Date(startDateTime) >= new Date(endDateTime)) {
@@ -210,9 +265,7 @@ export default function App() {
         carId: selectedCar.id,
         startTime: startDateTime,
         endTime: endDateTime,
-        purpose: bookingPurpose,
-        destination: bookingDestination,
-        passengers: bookingPassengers
+        purpose: bookingPurpose
       });
 
       addToast('ส่งคำขอจองสำเร็จแล้ว! กรุณารอเจ้าหน้าที่จัดคิวอนุมัติ', 'success');
@@ -222,8 +275,6 @@ export default function App() {
       setBookingStart('');
       setBookingEnd('');
       setBookingPurpose('');
-      setBookingDestination('');
-      setBookingPassengers(1);
 
       // Refresh Data
       fetchDashboardData();
@@ -397,7 +448,7 @@ export default function App() {
             <strong>{startStr}-{endStr}</strong>
           ) : (
             <span>
-              <strong>{statusIcon} {startStr} - {endStr}</strong> | {b.userName} ({b.destination})
+              <strong>{statusIcon} {startStr} - {endStr}</strong> | {b.userName}
             </span>
           )}
         </div>
@@ -717,12 +768,7 @@ export default function App() {
                           className="btn btn-primary"
                           style={{ padding: '6px 12px', fontSize: '0.85rem', marginLeft: 'auto' }}
                           disabled={car.status !== 'available'}
-                          onClick={() => {
-                            setSelectedCar(car);
-                            setBookingStart('08:00');
-                            setBookingEnd('09:00');
-                            setShowBookingModal(true);
-                          }}
+                          onClick={() => handleOpenBookingModal(car)}
                         >
                           จองคันนี้
                         </button>
@@ -810,8 +856,7 @@ export default function App() {
                         <th>วันเดินทาง</th>
                         <th>รถยนต์ที่เลือก</th>
                         <th>ช่วงเวลาจอง</th>
-                        <th>วัตถุประสงค์ / ปลายทาง</th>
-                        <th>จำนวนผู้เดินทาง</th>
+                        <th>วัตถุประสงค์การใช้รถ</th>
                         <th>สถานะการจอง</th>
                         <th>การอนุมัติ / หมายเหตุ</th>
                         <th>จัดการ</th>
@@ -823,11 +868,7 @@ export default function App() {
                           <td><strong>{formatThaiDate(b.startTime)}</strong></td>
                           <td>{getCarIcon(b.carImage ? b.carImage.replace(/[a-z_]+/g, 'van') : 'van')} {b.carModel}</td>
                           <td>{b.startTime.split('T')[1].substring(0, 5)} - {b.endTime.split('T')[1].substring(0, 5)} น.</td>
-                          <td>
-                            <div>{b.purpose}</div>
-                            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ปลายทาง: {b.destination}</span>
-                          </td>
-                          <td>{b.passengers} คน</td>
+                          <td>{b.purpose}</td>
                           <td>
                             <span className={`badge badge-${b.status}`}>
                               {b.status === 'pending' ? 'รอพิจารณา' : b.status === 'approved' ? 'อนุมัติแล้ว' : b.status === 'rejected' ? 'ปฏิเสธคำขอ' : 'ยกเลิกคำขอ'}
@@ -842,13 +883,12 @@ export default function App() {
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '130px' }}>
                               {b.status === 'approved' && (
                                 <a
-                                  href={generateGoogleCalendarLink(b)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
+                                  href={generateICSFileLink(b)}
+                                  download={`car_booking_${b.id}.ics`}
                                   className="btn"
-                                  style={{ padding: '6px 10px', fontSize: '0.75rem', textDecoration: 'none', background: '#4285F4', color: '#ffffff', border: 'none', borderRadius: '8px', textAlign: 'center', fontWeight: '600', display: 'block' }}
+                                  style={{ padding: '6px 10px', fontSize: '0.75rem', textDecoration: 'none', background: '#0078d4', color: '#ffffff', border: 'none', borderRadius: '8px', textAlign: 'center', fontWeight: '600', display: 'block' }}
                                 >
-                                  📅 เพิ่มลง Google
+                                  📅 เพิ่มลง Outlook
                                 </a>
                               )}
                               {(b.status === 'pending' || b.status === 'approved') && (
@@ -924,8 +964,7 @@ export default function App() {
                             <th>ประเภท / รุ่นรถ</th>
                             <th>วันที่เดินทาง</th>
                             <th>ช่วงเวลา</th>
-                            <th>ปลายทาง / วัตถุประสงค์</th>
-                            <th>ผู้เดินทาง</th>
+                            <th>วัตถุประสงค์การใช้รถ</th>
                             <th>อนุมัติ / ปฏิเสธ</th>
                           </tr>
                         </thead>
@@ -936,11 +975,7 @@ export default function App() {
                               <td>{b.carModel}</td>
                               <td>{formatThaiDate(b.startTime)}</td>
                               <td>{b.startTime.split('T')[1].substring(0, 5)} - {b.endTime.split('T')[1].substring(0, 5)} น.</td>
-                              <td>
-                                <div>{b.purpose}</div>
-                                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ไป: {b.destination}</span>
-                              </td>
-                              <td>{b.passengers} คน</td>
+                              <td>{b.purpose}</td>
                               <td style={{ display: 'flex', gap: '8px' }}>
                                 <button
                                   className="btn btn-success"
@@ -1256,14 +1291,94 @@ export default function App() {
               </div>
 
               <div className="form-group">
-                <label>วันที่เดินทาง (กรุณาเลือกใน Timeline ตารางจองของวันนี้)</label>
-                <input
-                  type="date"
-                  className="input-field"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  required
-                />
+                <label>วันที่เดินทาง: <strong style={{ color: 'var(--primary)' }}>{formatThaiFullDate(bookingDate)}</strong></label>
+                
+                {/* Visual Gregorian-to-Buddhist Inline Calendar Picker */}
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '12px',
+                  padding: '14px',
+                  marginTop: '8px',
+                  userSelect: 'none'
+                }}>
+                  {/* Calendar Header with Month/Year Navigation */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <button 
+                      type="button" 
+                      className="btn btn-secondary" 
+                      style={{ padding: '2px 8px', fontSize: '0.75rem', minWidth: '30px' }} 
+                      onClick={handlePrevMonth}
+                    >
+                      ◀
+                    </button>
+                    <span style={{ fontWeight: '700', fontSize: '0.9rem', color: 'var(--text-main)' }}>
+                      {THAI_MONTHS[calMonth]} พ.ศ. {calYearBE}
+                    </span>
+                    <button 
+                      type="button" 
+                      className="btn btn-secondary" 
+                      style={{ padding: '2px 8px', fontSize: '0.75rem', minWidth: '30px' }} 
+                      onClick={handleNextMonth}
+                    >
+                      ▶
+                    </button>
+                  </div>
+                  
+                  {/* Calendar Grid Container */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', textAlign: 'center' }}>
+                    {/* Day-of-week Labels */}
+                    {['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'].map((dayName, idx) => (
+                      <div key={dayName} style={{ 
+                        fontSize: '0.7rem', 
+                        fontWeight: '700', 
+                        color: idx === 0 ? 'var(--danger)' : idx === 6 ? 'var(--info)' : 'var(--text-muted)',
+                        paddingBottom: '4px'
+                      }}>
+                        {dayName}
+                      </div>
+                    ))}
+                    
+                    {/* Padding cells before the 1st of the month */}
+                    {Array.from({ length: new Date(calYearBE - 543, calMonth, 1).getDay() }).map((_, idx) => (
+                      <div key={`empty-${idx}`} />
+                    ))}
+                    
+                    {/* Active Month Days grid */}
+                    {Array.from({ length: new Date(calYearBE - 543, calMonth + 1, 0).getDate() }).map((_, idx) => {
+                      const dayNum = idx + 1;
+                      const cellDateStr = `${calYearBE - 543}-${String(calMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                      const isSelected = bookingDate === cellDateStr;
+                      
+                      return (
+                        <button
+                          key={dayNum}
+                          type="button"
+                          style={{
+                            border: 'none',
+                            background: isSelected ? 'var(--primary)' : 'transparent',
+                            color: isSelected ? '#ffffff' : 'var(--text-main)',
+                            borderRadius: '50%',
+                            width: '28px',
+                            height: '28px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '0.8rem',
+                            cursor: 'pointer',
+                            margin: '0 auto',
+                            transition: 'all 0.15s',
+                            fontWeight: isSelected ? '700' : 'normal'
+                          }}
+                          className={isSelected ? '' : 'calendar-day-hover'}
+                          onClick={() => setBookingDate(cellDateStr)}
+                        >
+                          {dayNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
@@ -1312,34 +1427,9 @@ export default function App() {
                 <input
                   type="text"
                   className="input-field"
-                  placeholder="เช่น ขนย้ายเอกสารการประชุม, พาคู่ค้าดูงาน"
+                  placeholder="เช่น รับ-ส่ง ที่ปรึกษาสภากาชาดไทย จากบ้านพักมาพบแพทย์ที่ รพ.จุฬา"
                   value={bookingPurpose}
                   onChange={(e) => setBookingPurpose(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label>ปลายทางที่ต้องการเดินทางไป</label>
-                <input
-                  type="text"
-                  className="input-field"
-                  placeholder="เช่น โรงแรมแกรนด์, สาขาย่อยรังสิต"
-                  value={bookingDestination}
-                  onChange={(e) => setBookingDestination(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label>จำนวนผู้ร่วมเดินทางจริง (คน)</label>
-                <input
-                  type="number"
-                  className="input-field"
-                  min="1"
-                  max="15"
-                  value={bookingPassengers}
-                  onChange={(e) => setBookingPassengers(parseInt(e.target.value || '1'))}
                   required
                 />
               </div>
