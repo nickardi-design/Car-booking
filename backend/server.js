@@ -5,7 +5,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import nodemailer from 'nodemailer';
 import pkg from 'pg';
 
 const { Pool } = pkg;
@@ -43,7 +42,7 @@ const readDB = () => {
     return JSON.parse(data);
   } catch (err) {
     console.error('Error reading database file, returning defaults', err);
-    return { users: [], cars: [], bookings: [], notificationLogs: [], settings: {} };
+    return { users: [], cars: [], bookings: [] };
   }
 };
 
@@ -195,69 +194,6 @@ const db = {
       }
       writeDB(data);
     }
-  },
-
-  getSettings: async () => {
-    if (usePostgres) {
-      const res = await pgPool.query('SELECT value FROM settings WHERE key = $1', ['config']);
-      if (res.rows.length > 0) {
-        return JSON.parse(res.rows[0].value);
-      }
-      return {
-        smtp: { host: '', port: '587', secure: false, user: '', pass: '', from: 'noreply@carbooking.com' },
-        line: { channelAccessToken: '', channelSecret: '', adminUserId: '' }
-      };
-    } else {
-      return readDB().settings || {};
-    }
-  },
-
-  saveSettings: async (settings) => {
-    if (usePostgres) {
-      await pgPool.query(
-        'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value',
-        ['config', JSON.stringify(settings)]
-      );
-    } else {
-      const data = readDB();
-      data.settings = settings;
-      writeDB(data);
-    }
-  },
-
-  getNotificationLogs: async () => {
-    if (usePostgres) {
-      const res = await pgPool.query('SELECT * FROM notification_logs ORDER BY timestamp DESC LIMIT 200');
-      return res.rows.map(row => ({
-        id: row.id,
-        timestamp: row.timestamp,
-        type: row.type,
-        recipient: row.recipient,
-        subject: row.subject,
-        message: row.message,
-        status: row.status,
-        error: row.error || undefined
-      }));
-    } else {
-      return readDB().notificationLogs || [];
-    }
-  },
-
-  saveNotificationLog: async (log) => {
-    if (usePostgres) {
-      await pgPool.query(
-        'INSERT INTO notification_logs (id, type, recipient, subject, message, status, error) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [log.id, log.type, log.recipient, log.subject, log.message, log.status, log.error || null]
-      );
-    } else {
-      const data = readDB();
-      data.notificationLogs = data.notificationLogs || [];
-      data.notificationLogs.unshift(log);
-      if (data.notificationLogs.length > 200) {
-        data.notificationLogs = data.notificationLogs.slice(0, 200);
-      }
-      writeDB(data);
-    }
   }
 };
 
@@ -317,28 +253,6 @@ const initPostgresDB = async () => {
     // Ensure driver column exists on existing PostgreSQL databases
     await client.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS driver VARCHAR(100) DEFAULT '';");
 
-    // Create Notification Logs Table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS notification_logs (
-        id VARCHAR(50) PRIMARY KEY,
-        timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        type VARCHAR(20) NOT NULL,
-        recipient VARCHAR(100) NOT NULL,
-        subject VARCHAR(255) NOT NULL,
-        message TEXT NOT NULL,
-        status VARCHAR(20) NOT NULL,
-        error TEXT
-      )
-    `);
-
-    // Create Settings Table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS settings (
-        key VARCHAR(50) PRIMARY KEY,
-        value TEXT NOT NULL
-      )
-    `);
-
     console.log('PostgreSQL Tables verified.');
 
     // Seed cars if empty
@@ -390,19 +304,6 @@ const initPostgresDB = async () => {
       console.log('PostgreSQL default user passwords updated successfully.');
     }
 
-    // Seed settings if empty
-    const settingsCheck = await client.query('SELECT COUNT(*) FROM settings');
-    if (parseInt(settingsCheck.rows[0].count) === 0) {
-      console.log('Seeding default settings into PostgreSQL...');
-      const defaultSettings = {
-        smtp: { host: '', port: '587', secure: false, user: '', pass: '', from: 'noreply@carbooking.com' },
-        line: { channelAccessToken: '', channelSecret: '', adminUserId: '' }
-      };
-      await client.query(
-        'INSERT INTO settings (key, value) VALUES ($1, $2)',
-        ['config', JSON.stringify(defaultSettings)]
-      );
-    }
   } catch (err) {
     console.error('PostgreSQL migration/seeding failed:', err);
   } finally {
@@ -461,87 +362,8 @@ const formatThaiDateTime = (dateString) => {
   return `${day} ${month} ${String(year).slice(-2)} เวลา ${h}:${min} น.`;
 };
 
-// --- NOTIFICATION HANDLERS (Actual SMTP & LINE or Simulator Hub) ---
-
 const sendNotification = async (type, recipient, subject, messageText) => {
-  const logId = 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-  const logEntry = {
-    id: logId,
-    timestamp: new Date().toISOString(),
-    type, // 'email' | 'line'
-    recipient,
-    subject,
-    message: messageText,
-    status: 'simulated' // 'simulated' | 'sent' | 'failed'
-  };
-
-  const settings = await db.getSettings();
-
-  if (type === 'email') {
-    const smtp = settings.smtp || {};
-    if (smtp.host && smtp.user && smtp.pass) {
-      try {
-        const transporter = nodemailer.createTransport({
-          host: smtp.host,
-          port: parseInt(smtp.port || '587'),
-          secure: smtp.secure === 'true' || smtp.secure === true,
-          auth: {
-            user: smtp.user,
-            pass: smtp.pass
-          }
-        });
-
-        await transporter.sendMail({
-          from: smtp.from || 'noreply@carbooking.com',
-          to: recipient,
-          subject: subject,
-          text: messageText
-        });
-        logEntry.status = 'sent';
-      } catch (err) {
-        console.error('SMTP Email sending failed:', err);
-        logEntry.status = 'failed';
-        logEntry.error = err.message;
-      }
-    }
-  } else if (type === 'line') {
-    const line = settings.line || {};
-    if (line.channelAccessToken) {
-      try {
-        const targetUserId = line.adminUserId || recipient;
-        if (targetUserId && targetUserId.startsWith('U')) {
-          const response = await fetch('https://api.line.me/v2/bot/message/push', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${line.channelAccessToken}`
-            },
-            body: JSON.stringify({
-              to: targetUserId,
-              messages: [{ type: 'text', text: `${subject}\n\n${messageText}` }]
-            })
-          });
-
-          if (response.ok) {
-            logEntry.status = 'sent';
-          } else {
-            const errText = await response.text();
-            logEntry.status = 'failed';
-            logEntry.error = `Line API error: ${response.status} ${errText}`;
-          }
-        } else {
-          logEntry.status = 'simulated';
-          logEntry.error = 'LINE ID ไม่ถูกต้อง (ต้องขึ้นต้นด้วย U สำหรับ Line User ID)';
-        }
-      } catch (err) {
-        console.error('LINE Message sending failed:', err);
-        logEntry.status = 'failed';
-        logEntry.error = err.message;
-      }
-    }
-  }
-
-  await db.saveNotificationLog(logEntry);
+  // Email and LINE notification functionality has been removed
 };
 
 // Double Booking Checker
@@ -1026,83 +848,7 @@ app.post('/api/admin/users/:id/suspend', authenticateToken, requireRole(['admin'
   }
 });
 
-// Get simulated notification logs
-app.get('/api/notifications', authenticateToken, async (req, res) => {
-  try {
-    const logs = await db.getNotificationLogs();
-    res.json(logs);
-  } catch (err) {
-    res.status(500).json({ message: err.message || 'ไม่สามารถโหลดประวัติการแจ้งเตือนได้' });
-  }
-});
 
-// Get settings
-app.get('/api/settings', authenticateToken, async (req, res) => {
-  try {
-    const settings = await db.getSettings();
-    
-    // Sanitize credentials
-    const safeSettings = {
-      smtp: {
-        host: settings.smtp?.host || '',
-        port: settings.smtp?.port || '587',
-        secure: settings.smtp?.secure || false,
-        user: settings.smtp?.user || '',
-        pass: settings.smtp?.pass ? '********' : '',
-        from: settings.smtp?.from || 'noreply@carbooking.com'
-      },
-      line: {
-        channelAccessToken: settings.line?.channelAccessToken ? '********' : '',
-        channelSecret: settings.line?.channelSecret ? '********' : '',
-        adminUserId: settings.line?.adminUserId || ''
-      }
-    };
-
-    res.json(safeSettings);
-  } catch (err) {
-    res.status(500).json({ message: err.message || 'ไม่สามารถโหลดข้อมูลเชื่อมต่อได้' });
-  }
-});
-
-// Save settings
-app.post('/api/settings', authenticateToken, requireRole(['admin']), async (req, res) => {
-  const { smtp, line } = req.body;
-  
-  try {
-    const current = await db.getSettings();
-    const updated = { ...current };
-
-    if (smtp) {
-      updated.smtp = updated.smtp || {};
-      updated.smtp.host = smtp.host;
-      updated.smtp.port = smtp.port;
-      updated.smtp.secure = smtp.secure;
-      updated.smtp.user = smtp.user;
-      updated.smtp.from = smtp.from;
-      
-      if (smtp.pass && smtp.pass !== '********') {
-        updated.smtp.pass = smtp.pass;
-      }
-    }
-
-    if (line) {
-      updated.line = updated.line || {};
-      updated.line.adminUserId = line.adminUserId;
-      
-      if (line.channelAccessToken && line.channelAccessToken !== '********') {
-        updated.line.channelAccessToken = line.channelAccessToken;
-      }
-      if (line.channelSecret && line.channelSecret !== '********') {
-        updated.line.channelSecret = line.channelSecret;
-      }
-    }
-
-    await db.saveSettings(updated);
-    res.json({ message: 'บันทึกการตั้งค่าเรียบร้อยแล้ว' });
-  } catch (err) {
-    res.status(500).json({ message: err.message || 'ไม่สามารถบันทึกข้อมูลการตั้งค่าได้' });
-  }
-});
 
 // --- SERVER INITIALIZATION ---
 

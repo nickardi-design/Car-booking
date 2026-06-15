@@ -147,15 +147,6 @@ export const api = {
     });
   },
 
-  // Settings & Logs
-  getNotificationLogs: () => request('/notifications'),
-  getSettings: () => request('/settings'),
-  saveSettings: (settingsData) => {
-    return request('/settings', {
-      method: 'POST',
-      body: JSON.stringify(settingsData),
-    });
-  },
 };
 
 // Date Format Helpers (Thai locale)

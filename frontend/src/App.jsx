@@ -17,18 +17,13 @@ export default function App() {
   const [name, setName] = useState('');
   
   // Navigation
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'my-bookings' | 'admin' | 'settings'
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'my-bookings' | 'admin'
   const [adminSubTab, setAdminSubTab] = useState('booking-requests'); // 'booking-requests' | 'user-activation' | 'car-status'
   
   // Data States
   const [cars, setCars] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [users, setUsers] = useState([]);
-  const [notificationLogs, setNotificationLogs] = useState([]);
-  const [settings, setSettings] = useState({
-    smtp: { host: '', port: '587', secure: false, user: '', pass: '', from: 'noreply@carbooking.com' },
-    line: { channelAccessToken: '', channelSecret: '', adminUserId: '' }
-  });
   
   // App UI/Interaction States
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -120,13 +115,12 @@ export default function App() {
     }
   }, [token]);
 
-  // Periodic updates for booking lists & logs (every 10 seconds)
+  // Periodic updates for booking lists (every 10 seconds)
   useEffect(() => {
     let interval;
     if (token) {
       interval = setInterval(() => {
         api.getBookings().then(setBookings).catch(console.error);
-        api.getNotificationLogs().then(setNotificationLogs).catch(console.error);
       }, 10000);
     }
     return () => clearInterval(interval);
@@ -150,9 +144,6 @@ export default function App() {
       
       const fetchedBookings = await api.getBookings();
       setBookings(fetchedBookings);
-      
-      const logs = await api.getNotificationLogs();
-      setNotificationLogs(logs);
     } catch (err) {
       setErrorMsg(err.message || 'โหลดข้อมูลล้มเหลว');
     } finally {
@@ -166,9 +157,6 @@ export default function App() {
       if (user.role === 'admin') {
         const fetchedUsers = await api.getUsers();
         setUsers(fetchedUsers);
-        
-        const fetchedSettings = await api.getSettings();
-        setSettings(fetchedSettings);
       }
     } catch (err) {
       addToast(err.message, 'danger');
@@ -536,19 +524,7 @@ export default function App() {
     }
   };
 
-  // Admin Save Settings
-  const handleSaveSettings = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      await api.saveSettings(settings);
-      addToast('บันทึกข้อมูลการเชื่อมต่อ Line & Email เรียบร้อย', 'success');
-    } catch (err) {
-      addToast(err.message, 'danger');
-    } finally {
-      setLoading(false);
-    }
-  };
+
 
   // --- RENDERING HELPERS & DATA PARSING ---
 
@@ -792,9 +768,7 @@ export default function App() {
               🛡️ จัดการคำขอจอง {bookings.filter(b => b.status === 'pending').length > 0 && <span style={{ background: 'var(--danger)', color: 'white', fontSize: '0.7rem', padding: '2px 6px', borderRadius: '10px', marginLeft: '4px' }}>{bookings.filter(b => b.status === 'pending').length}</span>}
             </div>
           )}
-          <div className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
-            ⚙️ แจ้งเตือน & ตั้งค่า
-          </div>
+
         </nav>
 
         <div className="user-profile-menu">
@@ -1025,32 +999,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* simulated notification widget */}
-                <div className="glass-panel">
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: '700', marginBottom: '6px' }}>🔔 ข้อความจำลอง (Line / Email Logs)</h3>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '16px' }}>ระบบจะส่งข้อความแจ้งเตือนหา Admin/User เสมือนจริง</p>
-                  <div className="log-list" style={{ maxHeight: '300px' }}>
-                    {notificationLogs.length === 0 ? (
-                      <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>ยังไม่มีรายการจำลองส่งแจ้งเตือนในระบบ</div>
-                    ) : (
-                      notificationLogs.map(log => (
-                        <div key={log.id} className="log-item">
-                          <div className="log-item-header">
-                            <span className="log-item-tag" style={{ color: log.type === 'line' ? '#06c755' : 'var(--info)' }}>
-                              {log.type === 'line' ? '💬 LINE NOTIFY' : '📧 EMAIL MAIL'}
-                            </span>
-                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{new Date(log.timestamp).toLocaleTimeString('th-TH')} น.</span>
-                          </div>
-                          <div style={{ fontSize: '0.85rem', fontWeight: '600' }}>{log.subject}</div>
-                          <div className="log-item-body" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{log.message}</div>
-                          <span style={{ alignSelf: 'flex-end', fontSize: '0.7rem', color: log.status === 'sent' ? 'var(--success)' : 'var(--text-muted)' }}>
-                            สถานะ: {log.status === 'sent' ? '✓ ส่งจริงสำเร็จ' : 'ℹ️ จำลองบนหน้าจอ'}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
+
 
               </div>
 
@@ -1359,143 +1308,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 4. SETTINGS & LOGS TAB */}
-        {activeTab === 'settings' && !loading && (
-          <div style={{ padding: '24px 5%', maxWidth: '1000px', margin: '0 auto' }}>
-            <div className="dashboard-grid" style={{ gridTemplateColumns: user?.role === 'admin' ? '1fr 1fr' : '1fr' }}>
-              
-              {/* Left Column: Admin SMTP & LINE credentials setup */}
-              {user?.role === 'admin' && (
-                <div className="glass-panel">
-                  <h3 style={{ fontSize: '1.2rem', fontWeight: '700', marginBottom: '6px' }}>⚙️ การเชื่อมต่อแจ้งเตือนจริง</h3>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '20px' }}>หากใส่ค่าข้อมูลจริง ระบบจะส่ง LINE Notify / SMTP เมลของหน่วยงานจริง</p>
-                  
-                  <form onSubmit={handleSaveSettings}>
-                    <h4 style={{ fontSize: '0.95rem', color: 'var(--primary)', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px', marginBottom: '14px' }}>📧 การเชื่อมต่อ Mail (SMTP)</h4>
-                    
-                    <div className="form-group">
-                      <label>SMTP Host</label>
-                      <input
-                        type="text"
-                        className="input-field"
-                        placeholder="เช่น smtp.gmail.com"
-                        value={settings.smtp.host}
-                        onChange={(e) => setSettings({ ...settings, smtp: { ...settings.smtp, host: e.target.value } })}
-                      />
-                    </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                      <div className="form-group">
-                        <label>SMTP Port</label>
-                        <input
-                          type="text"
-                          className="input-field"
-                          placeholder="587 / 465"
-                          value={settings.smtp.port}
-                          onChange={(e) => setSettings({ ...settings, smtp: { ...settings.smtp, port: e.target.value } })}
-                        />
-                      </div>
-                      <div className="form-group" style={{ flexDirection: 'row', alignItems: 'center', height: '100%' }}>
-                        <input
-                          type="checkbox"
-                          id="smtp_secure"
-                          style={{ marginRight: '8px' }}
-                          checked={settings.smtp.secure}
-                          onChange={(e) => setSettings({ ...settings, smtp: { ...settings.smtp, secure: e.target.checked } })}
-                        />
-                        <label htmlFor="smtp_secure" style={{ margin: '0', cursor: 'pointer' }}>ใช้ Secure SSL/TLS</label>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                      <div className="form-group">
-                        <label>อีเมลผู้ส่ง (Username)</label>
-                        <input
-                          type="text"
-                          className="input-field"
-                          placeholder="เช่น office@domain.com"
-                          value={settings.smtp.user}
-                          onChange={(e) => setSettings({ ...settings, smtp: { ...settings.smtp, user: e.target.value } })}
-                        />
-                      </div>
-                      <div className="form-group">
-                        <label>รหัสผ่านอีเมล (Password)</label>
-                        <input
-                          type="password"
-                          className="input-field"
-                          placeholder={settings.smtp.pass ? '********' : 'ตั้งค่ารหัสผ่านใหม่'}
-                          value={settings.smtp.pass}
-                          onChange={(e) => setSettings({ ...settings, smtp: { ...settings.smtp, pass: e.target.value } })}
-                        />
-                      </div>
-                    </div>
-
-                    <h4 style={{ fontSize: '0.95rem', color: '#06c755', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px', marginTop: '24px', marginBottom: '14px' }}>💬 การเชื่อมต่อ LINE Messaging API</h4>
-                    
-                    <div className="form-group">
-                      <label>LINE Channel Access Token</label>
-                      <input
-                        type="password"
-                        className="input-field"
-                        placeholder={settings.line.channelAccessToken ? '********' : 'ระบุ Token ของท่าน'}
-                        value={settings.line.channelAccessToken}
-                        onChange={(e) => setSettings({ ...settings, line: { ...settings.line, channelAccessToken: e.target.value } })}
-                      />
-                    </div>
-
-                    <div className="form-group">
-                      <label>LINE User ID ของผู้ดูแลระบบ (สำหรับรับแจ้งเตือนจองรถเข้า)</label>
-                      <input
-                        type="text"
-                        className="input-field"
-                        placeholder="เช่น U828198f3bb..."
-                        value={settings.line.adminUserId}
-                        onChange={(e) => setSettings({ ...settings, line: { ...settings.line, adminUserId: e.target.value } })}
-                      />
-                    </div>
-
-                    <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '16px' }} disabled={loading}>
-                      บันทึกตั้งค่า
-                    </button>
-                  </form>
-                </div>
-              )}
-
-              {/* Right/Single Column: Full notification log list */}
-              <div className="glass-panel">
-                <h3 style={{ fontSize: '1.2rem', fontWeight: '700', marginBottom: '6px' }}>📝 ประวัติส่งแจ้งเตือนทั้งหมดในเซิร์ฟเวอร์</h3>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '20px' }}>การเคลื่อนไหวของการอนุมัติ การจองรถ และการสมัคสมาชิก</p>
-                
-                <div className="log-list" style={{ maxHeight: '550px' }}>
-                  {notificationLogs.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>ยังไม่พบประวัติการแจ้งเตือนในระบบ</div>
-                  ) : (
-                    notificationLogs.map(log => (
-                      <div key={log.id} className="log-item">
-                        <div className="log-item-header">
-                          <span className="log-item-tag" style={{ color: log.type === 'line' ? '#06c755' : 'var(--info)' }}>
-                            {log.type === 'line' ? '💬 LINE MESSAGING' : '📧 EMAIL SMTP'}
-                          </span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{formatThaiDateTime(log.timestamp)}</span>
-                        </div>
-                        <div style={{ fontWeight: '700', fontSize: '0.9rem' }}>{log.subject}</div>
-                        <div className="log-item-body" style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{log.message}</div>
-                        
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', borderTop: '1px solid var(--border-color)', paddingTop: '6px', fontSize: '0.75rem' }}>
-                          <span style={{ color: 'var(--text-muted)' }}>ผู้รับ: {log.recipient}</span>
-                          <span style={{ fontWeight: '600', color: log.status === 'sent' ? 'var(--success)' : 'var(--warning)' }}>
-                            {log.status === 'sent' ? '✓ จัดส่งเรียบร้อย' : 'ℹ️ ระบบจำลอง Log'}
-                          </span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-            </div>
-          </div>
-        )}
 
       </main>
 
