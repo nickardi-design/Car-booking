@@ -143,6 +143,7 @@ const db = {
         status: row.status,
         notes: row.notes || '',
         approvedBy: row.approved_by || '',
+        driver: row.driver || '',
         createdAt: row.created_at,
         userName: row.userName,
         userEmail: row.userEmail,
@@ -168,8 +169,8 @@ const db = {
   saveBooking: async (booking) => {
     if (usePostgres) {
       await pgPool.query(
-        'INSERT INTO bookings (id, user_id, car_id, start_time, end_time, purpose, destination, passengers, status, notes, approved_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)',
-        [booking.id, booking.userId, booking.carId, booking.startTime, booking.endTime, booking.purpose, booking.destination, booking.passengers, booking.status, booking.notes, booking.approvedBy]
+        'INSERT INTO bookings (id, user_id, car_id, start_time, end_time, purpose, destination, passengers, status, notes, approved_by, driver) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)',
+        [booking.id, booking.userId, booking.carId, booking.startTime, booking.endTime, booking.purpose, booking.destination, booking.passengers, booking.status, booking.notes, booking.approvedBy, booking.driver || '']
       );
     } else {
       const data = readDB();
@@ -308,9 +309,13 @@ const initPostgresDB = async () => {
         status VARCHAR(20) NOT NULL,
         notes TEXT,
         approved_by VARCHAR(100),
+        driver VARCHAR(100) DEFAULT '',
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // Ensure driver column exists on existing PostgreSQL databases
+    await client.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS driver VARCHAR(100) DEFAULT '';");
 
     // Create Notification Logs Table
     await client.query(`
@@ -740,7 +745,7 @@ app.get('/api/bookings', authenticateToken, async (req, res) => {
 
 // Create booking
 app.post('/api/bookings', authenticateToken, async (req, res) => {
-  const { carId, startTime, endTime, purpose } = req.body;
+  const { carId, startTime, endTime, purpose, driver } = req.body;
 
   if (!carId || !startTime || !endTime || !purpose) {
     return res.status(400).json({ message: 'กรุณากรอกข้อมูลการจองให้ครบถ้วน' });
@@ -773,6 +778,7 @@ app.post('/api/bookings', authenticateToken, async (req, res) => {
       status: 'pending',
       notes: '',
       approvedBy: '',
+      driver: driver || '',
       createdAt: new Date().toISOString()
     };
 

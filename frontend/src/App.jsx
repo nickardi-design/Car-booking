@@ -42,11 +42,16 @@ export default function App() {
   const [bookingStart, setBookingStart] = useState('');
   const [bookingEnd, setBookingEnd] = useState('');
   const [bookingPurpose, setBookingPurpose] = useState('');
+  const [bookingDriver, setBookingDriver] = useState('นายสุรศักดิ์ ชาแท่น');
   
   // Custom Thai Date States for independent visual inline calendar selection (วัน เดือน ปี พ.ศ.)
   const [bookingDate, setBookingDate] = useState(new Date().toISOString().split('T')[0]);
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
   const [calYearBE, setCalYearBE] = useState(new Date().getFullYear() + 543);
+
+  // States for Quick Text Booking Paste feature
+  const [quickBookingText, setQuickBookingText] = useState('');
+  const [parsedResults, setParsedResults] = useState([]);
 
   const THAI_MONTHS = [
     'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
@@ -181,6 +186,8 @@ export default function App() {
     setSelectedCar(car);
     setBookingStart('08:00');
     setBookingEnd('09:00');
+    setBookingPurpose('');
+    setBookingDriver('นายสุรศักดิ์ ชาแท่น');
     
     const d = new Date(selectedDate);
     if (!isNaN(d.getTime())) {
@@ -265,7 +272,8 @@ export default function App() {
         carId: selectedCar.id,
         startTime: startDateTime,
         endTime: endDateTime,
-        purpose: bookingPurpose
+        purpose: bookingPurpose,
+        driver: bookingDriver
       });
 
       addToast('ส่งคำขอจองสำเร็จแล้ว! กรุณารอเจ้าหน้าที่จัดคิวอนุมัติ', 'success');
@@ -294,6 +302,157 @@ export default function App() {
     } catch (err) {
       addToast(err.message, 'danger');
     }
+  };
+
+  // --- AI QUICK BOOKING PASTE UTILITIES ---
+
+  const parseBookingText = (inputText) => {
+    if (!inputText || !inputText.trim()) return [];
+    
+    const lines = inputText.split('\n').map(l => l.trim()).filter(Boolean);
+    let currentDate = new Date().toISOString().split('T')[0];
+    const results = [];
+    
+    const carsMapping = [
+      { id: 'car1', model: 'รถตู้ ฮร 8010 สีขาว', keywords: ['รถตู้ขาว', 'ตู้ขาว', 'รถตู้ ฮร', 'ฮร 8010', 'ตู้ ฮร'] },
+      { id: 'car2', model: 'รถตู้ ฮย 1906 สีเทา', keywords: ['รถตู้เทา', 'ตู้เทา', 'รถตู้ ฮย', 'ฮย 1906', 'ตู้ ฮย'] },
+      { id: 'car3', model: 'รถยาริส ฌอ 6249 สีเทา', keywords: ['ยาริส', 'เก๋งเทา', 'ยาริส ฌอ', 'ฌอ 6249'] },
+      { id: 'car4', model: 'รถเชฟ ศฐ 8709 สีดำ', keywords: ['เชฟ', 'เชฟโรเลต', 'รถดำ', 'ศฐ 8709'] },
+      { id: 'car5', model: 'รถอัลพาร์ด 8กว 6276 สีขาว', keywords: ['อัลพาร์ด', 'alphard', 'ตู้หรู', '8กว 6276'] }
+    ];
+
+    for (let line of lines) {
+      // Check if line is just a date
+      const dateOnlyRegex = /^\s*(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})\s*$/;
+      const dateOnlyMatch = line.match(dateOnlyRegex);
+      if (dateOnlyMatch) {
+        const d = parseInt(dateOnlyMatch[1]);
+        const m = parseInt(dateOnlyMatch[2]);
+        let y = parseInt(dateOnlyMatch[3]);
+        if (y > 2400) y -= 543;
+        currentDate = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        continue;
+      }
+
+      let lineDate = currentDate;
+      let lineText = line;
+
+      // Check for inline date in line
+      const inlineDateRegex = /(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})/;
+      const inlineDateMatch = lineText.match(inlineDateRegex);
+      if (inlineDateMatch) {
+        const d = parseInt(inlineDateMatch[1]);
+        const m = parseInt(inlineDateMatch[2]);
+        let y = parseInt(inlineDateMatch[3]);
+        if (y > 2400) y -= 543;
+        lineDate = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        lineText = lineText.replace(inlineDateMatch[0], '');
+      }
+
+      // Parse Times
+      let startTime = '';
+      let endTime = '';
+
+      const rangeRegex = /(?:เวลา\s*)?(\d{1,2})[\.:](\d{2})\s*(?:-|ถึง)\s*(\d{1,2})[\.:](\d{2})\s*(?:น\.)?/;
+      const rangeMatch = lineText.match(rangeRegex);
+      if (rangeMatch) {
+        startTime = `${String(rangeMatch[1]).padStart(2, '0')}:${rangeMatch[2]}`;
+        endTime = `${String(rangeMatch[3]).padStart(2, '0')}:${rangeMatch[4]}`;
+        lineText = lineText.replace(rangeMatch[0], '');
+      } else {
+        const singleTimeRegex = /(?:เวลา\s*)?(\d{1,2})[\.:](\d{2})\s*(?:น\.)?/;
+        const singleMatch = lineText.match(singleTimeRegex);
+        if (singleMatch) {
+          startTime = `${String(singleMatch[1]).padStart(2, '0')}:${singleMatch[2]}`;
+          let endHour = parseInt(singleMatch[1]) + 2;
+          if (endHour > 23) endHour = 23;
+          endTime = `${String(endHour).padStart(2, '0')}:${singleMatch[2]}`;
+          lineText = lineText.replace(singleMatch[0], '');
+        }
+      }
+
+      // Match Car
+      let matchedCarId = '';
+      let matchedCarModel = '';
+      for (const car of carsMapping) {
+        for (const kw of car.keywords) {
+          if (lineText.toLowerCase().includes(kw.toLowerCase())) {
+            matchedCarId = car.id;
+            matchedCarModel = car.model;
+            const kwRegex = new RegExp(kw, 'gi');
+            lineText = lineText.replace(kwRegex, '');
+            break;
+          }
+        }
+        if (matchedCarId) break;
+      }
+
+      let purpose = lineText
+        .replace(/\s+/g, ' ')
+        .replace(/^[,.\s\-:|]+|[,.\s\-:|]+$/g, '')
+        .trim();
+
+      if (startTime || purpose) {
+        const displayDate = new Date(lineDate);
+        const thaiMonths = [
+          'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+          'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
+        ];
+        const dateFormatted = `${displayDate.getDate()} ${thaiMonths[displayDate.getMonth()]} ${displayDate.getFullYear() + 543}`;
+
+        results.push({
+          date: lineDate,
+          dateFormatted,
+          startTime: startTime || '08:00',
+          endTime: endTime || '10:00',
+          carId: matchedCarId,
+          carModel: matchedCarModel,
+          purpose: purpose || 'ไม่ได้ระบุวัตถุประสงค์'
+        });
+      }
+    }
+    return results;
+  };
+
+  const handleParseQuickBooking = () => {
+    try {
+      const results = parseBookingText(quickBookingText);
+      if (results.length === 0) {
+        addToast('ไม่พบข้อมูลการจองในข้อความที่กรอก กรุณาตรวจสอบรูปแบบข้อความ', 'warning');
+        return;
+      }
+      setParsedResults(results);
+      addToast(`วิเคราะห์ข้อมูลสำเร็จ พบรายการจองทั้งหมด ${results.length} รายการ`, 'success');
+      
+      if (results.length === 1) {
+        handleApplyParsedBooking(results[0]);
+      }
+    } catch (err) {
+      addToast('เกิดข้อผิดพลาดในการวิเคราะห์ข้อความ', 'danger');
+    }
+  };
+
+  const handleApplyParsedBooking = (result) => {
+    const targetCar = cars.find(c => c.id === result.carId);
+    if (!targetCar) {
+      setSelectedCar(cars[0] || null);
+    } else {
+      setSelectedCar(targetCar);
+    }
+    
+    setBookingDate(result.date);
+    
+    const d = new Date(result.date);
+    setCalMonth(d.getMonth());
+    setCalYearBE(d.getFullYear() + 543);
+
+    setBookingStart(result.startTime);
+    setBookingEnd(result.endTime);
+    setBookingPurpose(result.purpose);
+    setBookingDriver('นายสุรศักดิ์ ชาแท่น');
+
+    setShowBookingModal(true);
+    addToast('กรอกข้อมูลจองอัตโนมัติสำเร็จแล้ว กรุณาตรวจสอบและกดบันทึก', 'info');
   };
 
   // Admin/Scheduler Approve Booking
@@ -440,7 +599,7 @@ export default function App() {
           key={b.id}
           className={`timeline-slot-bar ${b.status}`}
           style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }}
-          onClick={() => addToast(`🚗 จองรถ: ${b.carModel} โดย: ${b.userName} (${b.purpose}) | เวลา ${startStr} - ${endStr} น.`, 'info')}
+          onClick={() => addToast(`🚗 จองรถ: ${b.carModel} โดย: ${b.userName} (${b.purpose}) | คนขับ: ${b.driver || 'ไม่ระบุ'} | เวลา ${startStr} - ${endStr} น.`, 'info')}
         >
           {isVeryNarrow ? (
             <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{statusIcon}</span>
@@ -735,6 +894,77 @@ export default function App() {
               </div>
             </div>
 
+            {/* Quick Paste Booking Section */}
+            <div className="glass-panel" style={{ margin: '0', padding: '20px' }}>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: '700', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                ⚡ จองรถยนต์อัจฉริยะด้วยการวางข้อความ
+              </h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '14px' }}>
+                คุณสามารถคัดลอกข้อความตารางงานจองรถยนต์จาก LINE หรือข้อความจัดตารางงานมาวางด้านล่างนี้ ระบบจะทำการประมวลผลดึงข้อมูลให้อัตโนมัติ (รองรับการจองหลายรายการพร้อมกันในข้อความเดียว)
+              </p>
+              
+              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                <textarea
+                  className="input-field"
+                  style={{ flex: '1', minWidth: '300px', height: '100px', padding: '12px', resize: 'vertical', fontSize: '0.9rem', fontFamily: 'inherit' }}
+                  placeholder="ตัวอย่างการจองเดี่ยว: 4/6/2569 เวลา 08.00 น. รถตู้ขาว รับ-ส่ง ที่ปรึกษาสภากาชาดไทย...&#10;ตัวอย่างการจองหลายรายการ:&#10;2/6/2569&#10;เวลา 09.00 น. รถตู้ขาว รับ-ส่ง นาย A...&#10;เวลา 12.00 น. รถตู้ขาว รับ-ส่ง นาย B..."
+                  value={quickBookingText}
+                  onChange={(e) => setQuickBookingText(e.target.value)}
+                />
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignSelf: 'stretch', justifyContent: 'center' }}>
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={handleParseQuickBooking}
+                    style={{ padding: '10px 20px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    ⚡ วิเคราะห์และจองด่วน
+                  </button>
+                  <button 
+                    className="btn btn-secondary" 
+                    onClick={() => { setQuickBookingText(''); setParsedResults([]); }}
+                    style={{ padding: '8px 20px', fontSize: '0.85rem' }}
+                  >
+                    ล้างค่า
+                  </button>
+                </div>
+              </div>
+
+              {/* Parsed Results List */}
+              {parsedResults.length > 0 && (
+                <div style={{ marginTop: '20px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+                  <h4 style={{ fontSize: '1.05rem', fontWeight: '700', marginBottom: '12px', color: 'var(--primary)' }}>
+                    🔍 รายการจองที่วิเคราะห์พบ ({parsedResults.length} รายการ):
+                  </h4>
+                  <div style={{ display: 'flex', gap: '12px', flexDirection: 'column' }}>
+                    {parsedResults.map((result, idx) => (
+                      <div key={idx} className="glass-panel" style={{ background: 'rgba(255, 255, 255, 0.01)', padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', margin: '0', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1', minWidth: '250px' }}>
+                          <div style={{ fontWeight: '700', fontSize: '0.95rem', color: 'var(--primary)' }}>
+                            {result.carModel ? `🚗 ${result.carModel}` : '❌ ไม่สามารถระบุรถยนต์ได้ (กรุณาเลือกในฟอร์ม)'}
+                          </div>
+                          <div style={{ fontSize: '0.85rem', color: 'var(--text-main)' }}>
+                            📅 วันเดินทาง: <strong>{result.dateFormatted}</strong> | ⏰ เวลา: <strong>{result.startTime} - {result.endTime} น.</strong>
+                          </div>
+                          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                            📝 วัตถุประสงค์: <em>"{result.purpose}"</em>
+                          </div>
+                        </div>
+                        
+                        <button
+                          className="btn btn-primary"
+                          style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+                          onClick={() => handleApplyParsedBooking(result)}
+                        >
+                          ดึงข้อมูลเพื่อจองรถคันนี้
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Bottom Section (2 Columns Grid) */}
             <div className="dashboard-bottom-grid">
               
@@ -859,7 +1089,10 @@ export default function App() {
                           <td><strong>{formatThaiDate(b.startTime)}</strong></td>
                           <td>{getCarIcon(b.carImage ? b.carImage.replace(/[a-z_]+/g, 'van') : 'van')} {b.carModel}</td>
                           <td>{b.startTime.split('T')[1].substring(0, 5)} - {b.endTime.split('T')[1].substring(0, 5)} น.</td>
-                          <td>{b.purpose}</td>
+                          <td>
+                            {b.purpose}
+                            {b.driver && <div style={{ fontSize: '0.8rem', color: 'var(--primary)', marginTop: '4px' }}>👤 คนขับ: {b.driver}</div>}
+                          </td>
                           <td>
                             <span className={`badge badge-${b.status}`}>
                               {b.status === 'pending' ? 'รอพิจารณา' : b.status === 'approved' ? 'อนุมัติแล้ว' : b.status === 'rejected' ? 'ปฏิเสธคำขอ' : 'ยกเลิกคำขอ'}
@@ -966,7 +1199,10 @@ export default function App() {
                               <td>{b.carModel}</td>
                               <td>{formatThaiDate(b.startTime)}</td>
                               <td>{b.startTime.split('T')[1].substring(0, 5)} - {b.endTime.split('T')[1].substring(0, 5)} น.</td>
-                              <td>{b.purpose}</td>
+                              <td>
+                            {b.purpose}
+                            {b.driver && <div style={{ fontSize: '0.8rem', color: 'var(--primary)', marginTop: '4px' }}>👤 คนขับ: {b.driver}</div>}
+                          </td>
                               <td style={{ display: 'flex', gap: '8px' }}>
                                 <button
                                   className="btn btn-success"
@@ -1411,6 +1647,21 @@ export default function App() {
                     })}
                   </select>
                 </div>
+              </div>
+
+              <div className="form-group">
+                <label>พนักงานขับรถ (Driver)</label>
+                <select
+                  className="input-field"
+                  value={bookingDriver}
+                  onChange={(e) => setBookingDriver(e.target.value)}
+                  required
+                >
+                  <option value="นายสุรศักดิ์ ชาแท่น">นายสุรศักดิ์ ชาแท่น</option>
+                  <option value="นายสุระเชษฐ วิบูลพันธุ์">นายสุระเชษฐ วิบูลพันธุ์</option>
+                  <option value="นายวิไล พลรักษา">นายวิไล พลรักษา</option>
+                  <option value="นายเฉลิมพล ชมเชย">นายเฉลิมพล ชมเชย</option>
+                </select>
               </div>
 
               <div className="form-group">
