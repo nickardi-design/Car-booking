@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import pkg from 'pg';
+import cron from 'node-cron';
 
 const { Pool } = pkg;
 
@@ -364,6 +365,85 @@ const formatThaiDateTime = (dateString) => {
 
 const sendNotification = async (type, recipient, subject, messageText) => {
   // Email and LINE notification functionality has been removed
+};
+
+const getBangkokTodayString = () => {
+  const tzDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Bangkok" }));
+  const y = tzDate.getFullYear();
+  const m = String(tzDate.getMonth() + 1).padStart(2, '0');
+  const d = String(tzDate.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const sendDailyBookingsToLINE = async () => {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const groupId = process.env.LINE_GROUP_ID;
+
+  if (!token || !groupId) {
+    console.error("LINE group notification failed: LINE_CHANNEL_ACCESS_TOKEN or LINE_GROUP_ID is not configured in environment variables.");
+    return { success: false, message: "LINE credentials not configured in environment variables." };
+  }
+
+  try {
+    const bookings = await db.getBookings();
+    const todayStr = getBangkokTodayString();
+    
+    // Filter bookings starting today (Bangkok timezone) that are approved
+    const todayBookings = bookings.filter(b => {
+      if (b.status !== 'approved') return false;
+      const bDate = new Date(b.startTime);
+      const bTzStr = new Date(bDate.toLocaleString("en-US", { timeZone: "Asia/Bangkok" }));
+      const y = bTzStr.getFullYear();
+      const m = String(bTzStr.getMonth() + 1).padStart(2, '0');
+      const d = String(bTzStr.getDate()).padStart(2, '0');
+      const bDateStr = `${y}-${m}-${d}`;
+      return bDateStr === todayStr;
+    });
+
+    // Format Thai date for message
+    const formattedDate = formatThaiDate(new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Bangkok" })));
+    
+    let messageText = `🚗 รายงานรายการจองรถยนต์วันนี้ (${formattedDate})\n\n`;
+    
+    if (todayBookings.length === 0) {
+      messageText += `ไม่มีรายการจองรถยนต์ที่ได้รับการอนุมัติในวันนี้`;
+    } else {
+      todayBookings.forEach((b, idx) => {
+        const startHour = b.startTime.split('T')[1]?.substring(0, 5) || '';
+        const endHour = b.endTime.split('T')[1]?.substring(0, 5) || '';
+        messageText += `${idx + 1}. เวลา: ${startHour} - ${endHour} น.\n`;
+        messageText += `   รถยนต์: ${b.carModel}\n`;
+        messageText += `   วัตถุประสงค์: ${b.purpose}\n`;
+        messageText += `   คนขับ: ${b.driver || 'ไม่ระบุ'}\n`;
+        messageText += `   ผู้ขอจอง: ${b.userName}\n\n`;
+      });
+      messageText = messageText.trim();
+    }
+
+    const response = await fetch('https://api.line.me/v2/bot/message/push', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        to: groupId,
+        messages: [{ type: 'text', text: messageText }]
+      })
+    });
+
+    if (response.ok) {
+      console.log("Daily bookings LINE notification sent successfully.");
+      return { success: true, message: "Notification sent successfully.", count: todayBookings.length };
+    } else {
+      const errText = await response.text();
+      console.error(`LINE API push message failed: ${response.status} ${errText}`);
+      return { success: false, message: `LINE API error: ${response.status} ${errText}` };
+    }
+  } catch (err) {
+    console.error("Error sending daily bookings LINE notification:", err);
+    return { success: false, message: err.message };
+  }
 };
 
 // Double Booking Checker
@@ -849,6 +929,31 @@ app.post('/api/admin/users/:id/suspend', authenticateToken, requireRole(['admin'
 });
 
 
+
+// Expose public API route for manual or external cron triggers
+app.get('/api/cron/daily-send', async (req, res) => {
+  // Option: verify key to prevent spam
+  const secretKey = req.query.key;
+  if (process.env.CRON_KEY && secretKey !== process.env.CRON_KEY) {
+    return res.status(401).json({ message: 'Unauthorized: invalid cron key' });
+  }
+
+  const result = await sendDailyBookingsToLINE();
+  if (result.success) {
+    res.json({ message: 'Daily LINE notification triggered successfully', data: result });
+  } else {
+    res.status(500).json({ message: 'Failed to send daily LINE notification', error: result });
+  }
+});
+
+// Register the local cron schedule at 08:30 AM Asia/Bangkok time
+cron.schedule('30 8 * * *', async () => {
+  console.log('Running daily scheduled LINE notification at 8:30 AM Bangkok Time...');
+  await sendDailyBookingsToLINE();
+}, {
+  scheduled: true,
+  timezone: "Asia/Bangkok"
+});
 
 // --- SERVER INITIALIZATION ---
 
