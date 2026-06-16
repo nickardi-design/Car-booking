@@ -554,69 +554,6 @@ export default function App() {
 
   // --- RENDERING HELPERS & DATA PARSING ---
 
-  // Overlap percentages calculation for Gantt Timeline chart
-  // Start from 06:00 (6 AM) to 22:00 (10 PM) -> 16 hours duration
-  const renderBookingBlocks = (carId) => {
-    const startHourLimit = 0;
-    const endHourLimit = 24;
-    const totalHours = endHourLimit - startHourLimit;
-
-    // Filter bookings for this car on selected Date and approved/pending
-    const dayBookings = bookings.filter(b => {
-      if (b.carId !== carId) return false;
-      if (b.status === 'rejected' || b.status === 'cancelled') return false;
-
-      // Booking start/end dates matches selected date
-      const bStartDay = b.startTime.split('T')[0];
-      const bEndDay = b.endTime.split('T')[0];
-      return bStartDay === selectedDate || bEndDay === selectedDate;
-    });
-
-    return dayBookings.map(b => {
-      const bStart = new Date(b.startTime);
-      const bEnd = new Date(b.endTime);
-
-      // Extract hours & minutes as decimals relative to start of timeline (6:00 AM)
-      const startHour = bStart.getHours() + bStart.getMinutes() / 60;
-      const endHour = bEnd.getHours() + bEnd.getMinutes() / 60;
-
-      // Clamp within timeline limits 06:00 - 22:00
-      const leftHour = Math.max(startHourLimit, Math.min(endHourLimit, startHour));
-      const rightHour = Math.max(startHourLimit, Math.min(endHourLimit, endHour));
-
-      const leftPercent = ((leftHour - startHourLimit) / totalHours) * 100;
-      const widthPercent = ((rightHour - leftHour) / totalHours) * 100;
-
-      // Ignore zero width (e.g. fully outside timeline)
-      if (widthPercent <= 0) return null;
-
-      const startStr = b.startTime.split('T')[1].substring(0, 5);
-      const endStr = b.endTime.split('T')[1].substring(0, 5);
-      const isNarrow = widthPercent < 18;
-      const isVeryNarrow = widthPercent < 8;
-      const statusIcon = b.status === 'approved' ? '✓' : '⏳';
-
-      return (
-        <div
-          key={b.id}
-          className={`timeline-slot-bar ${b.status}`}
-          style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }}
-          onClick={() => addToast(`🚗 จองรถ: ${b.carModel} โดย: ${b.userName} (${b.purpose}) | คนขับ: ${b.driver || 'ไม่ระบุ'} | เวลา ${startStr} - ${endStr} น.`, 'info')}
-        >
-          {isVeryNarrow ? (
-            <span style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>{statusIcon}</span>
-          ) : isNarrow ? (
-            <strong>{startStr}-{endStr}</strong>
-          ) : (
-            <span>
-              <strong>{statusIcon} {startStr} - {endStr}</strong> | {b.userName}
-            </span>
-          )}
-        </div>
-      );
-    });
-  };
-
   // Render auth screens (Login & Register)
   if (!token) {
     return (
@@ -822,76 +759,81 @@ export default function App() {
         {activeTab === 'dashboard' && !loading && (
           <div style={{ padding: '24px 4%', width: '100%', maxWidth: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '24px' }}>
             
-            {/* Daily Timeline Gantt Chart (Full Screen Width) */}
-            <div className="glass-panel timeline-section" style={{ margin: '0' }}>
-              <div className="timeline-header">
-                <h3 style={{ fontSize: '1.2rem', fontWeight: '700' }}>📅 ตารางเวลาจองรถยนต์วันนี้ (ครอบคลุม 24 ชม.)</h3>
-                <div className="form-group" style={{ margin: '0', flexDirection: 'row', alignItems: 'center', gap: '10px' }}>
-                  <label style={{ margin: '0' }}>ระบุวันที่:</label>
-                  <input
-                    type="date"
-                    className="input-field"
-                    style={{ padding: '6px 12px', width: 'auto' }}
-                    value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                  />
-                </div>
+            {/* รายการจองรถยนต์ทั้งหมด (เรียงจากวันที่ล่าสุดด้านบน) */}
+            <div className="glass-panel" style={{ margin: '0', padding: '24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: '700', margin: '0' }}>📅 รายการจองรถยนต์ในระบบทั้งหมด (เรียงจากวันที่ล่าสุด)</h3>
+                <span className="badge badge-info" style={{ fontSize: '0.8rem', padding: '4px 10px' }}>
+                  ทั้งหมด: {bookings.length} รายการ
+                </span>
               </div>
 
-              <div className="timeline-container">
-                <div className="timeline-grid">
-                  
-                  {/* Time Label Header Row */}
-                  <div className="timeline-time-labels">
-                    <div style={{ padding: '8px 16px', borderRight: '1px solid var(--border-color)' }}>รุ่นรถยนต์ / สิทธิ์จอง</div>
-                    <div className="timeline-time-labels-slots">
-                      {Array.from({ length: 24 }).map((_, i) => (
+              {bookings.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                  ไม่มีรายการจองรถยนต์ในระบบ
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '450px', overflowY: 'auto', paddingRight: '6px' }}>
+                  {[...bookings]
+                    .sort((a, b) => new Date(b.startTime) - new Date(a.startTime)) // เรียงจากล่าสุดด้านบน (descending)
+                    .map(b => {
+                      const car = cars.find(c => c.id === b.carId);
+                      const carType = car ? car.type : 'van';
+                      return (
                         <div 
-                          key={i} 
+                          key={b.id} 
+                          className="glass-panel" 
                           style={{ 
-                            fontSize: '0.65rem', 
-                            display: 'flex', 
-                            justifyContent: i === 23 ? 'space-between' : 'flex-start',
-                            paddingLeft: '4px',
-                            paddingRight: i === 23 ? '6px' : '0',
-                            color: 'var(--text-muted)'
+                            margin: '0', 
+                            padding: '16px 20px', 
+                            background: 'rgba(255, 255, 255, 0.01)', 
+                            border: '1px solid rgba(255, 255, 255, 0.05)',
+                            borderRadius: '10px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: '16px',
+                            transition: 'all 0.2s'
                           }}
                         >
-                          <span>{i.toString().padStart(2, '0')}:00</span>
-                          {i === 23 && <span>24:00</span>}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                          <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flex: '1', minWidth: '280px' }}>
+                            <span style={{ fontSize: '2rem', background: 'rgba(255,255,255,0.03)', padding: '10px', borderRadius: '50%', width: '50px', height: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {getCarIcon(carType)}
+                            </span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              <div style={{ fontWeight: '700', fontSize: '1rem', color: 'var(--text-main)' }}>
+                                {b.carModel}
+                              </div>
+                              <div style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: '600' }}>
+                                📅 {formatThaiDateTime(b.startTime)} - {b.endTime.split('T')[1]?.substring(0, 5) || ''} น.
+                              </div>
+                              <div style={{ fontSize: '0.85rem', color: 'var(--text-main)' }}>
+                                📝 วัตถุประสงค์: <span style={{ color: 'var(--text-muted)' }}>{b.purpose}</span>
+                              </div>
+                              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '4px', fontSize: '0.8rem' }}>
+                                {b.driver && <span style={{ color: 'var(--info)' }}>👤 คนขับ: {b.driver}</span>}
+                                <span style={{ color: 'var(--text-muted)' }}>👤 ผู้จอง: {b.userName}</span>
+                              </div>
+                            </div>
+                          </div>
 
-                  {/* Booking Blocks for Each Car */}
-                  {cars.map(car => (
-                    <div className="timeline-row" key={car.id}>
-                      <div className="timeline-car-info">
-                        <div>{getCarIcon(car.type)} {car.model}</div>
-                        <span>สถานะ: {car.status === 'available' ? '🟢 พร้อมใช้' : '🔴 ซ่อมบำรุง'}</span>
-                      </div>
-                      <div className="timeline-slots">
-                        {/* Render hour divisions subtle background line */}
-                        <div className="timeline-time-labels-slots" style={{ position: 'absolute', top: '0', left: '0', width: '100%', height: '100%', pointerEvents: 'none', opacity: '0.06' }}>
-                          {Array.from({ length: 24 }).map((_, i) => (
-                            <div 
-                              key={i} 
-                              style={{ 
-                                borderLeft: '1px solid var(--text-main)', 
-                                borderRight: i === 23 ? '1px solid var(--text-main)' : 'none',
-                                height: '80px' 
-                              }} 
-                            />
-                          ))}
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px', minWidth: '120px' }}>
+                            <span className={`badge badge-${b.status}`} style={{ padding: '6px 12px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: '700' }}>
+                              {b.status === 'pending' ? 'รอพิจารณา' : b.status === 'approved' ? 'อนุมัติแล้ว' : b.status === 'rejected' ? 'ปฏิเสธคำขอ' : 'ยกเลิกคำขอ'}
+                            </span>
+                            {b.status === 'approved' && b.approvedBy && (
+                              <span style={{ fontSize: '0.75rem', color: 'var(--success)' }}>อนุมัติโดย: {b.approvedBy}</span>
+                            )}
+                            {b.status === 'rejected' && b.notes && (
+                              <span style={{ fontSize: '0.75rem', color: 'var(--danger)', maxWidth: '180px', textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={b.notes}>เหตุผล: {b.notes}</span>
+                            )}
+                          </div>
                         </div>
-                        {renderBookingBlocks(car.id)}
-                      </div>
-                    </div>
-                  ))}
-
+                      );
+                    })}
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Quick Paste Booking Section */}
