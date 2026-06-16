@@ -146,7 +146,11 @@ export const api = {
       body: JSON.stringify({ role }),
     });
   },
-
+  resetSystem: () => {
+    return request('/admin/reset-system', {
+      method: 'POST',
+    });
+  },
 };
 
 // Date Format Helpers (Thai locale)

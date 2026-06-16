@@ -195,6 +195,32 @@ const db = {
       }
       writeDB(data);
     }
+  },
+
+  resetSystem: async () => {
+    if (usePostgres) {
+      const client = await pgPool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('TRUNCATE TABLE bookings CASCADE');
+        await client.query("DELETE FROM users WHERE username NOT IN ('admin', 'scheduler', 'user')");
+        await client.query("UPDATE cars SET status = 'available'");
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    } else {
+      const data = readDB();
+      data.bookings = [];
+      data.users = data.users.filter(u => ['admin', 'scheduler', 'user'].includes(u.username));
+      data.cars.forEach(c => {
+        c.status = 'available';
+      });
+      writeDB(data);
+    }
   }
 };
 
@@ -464,6 +490,24 @@ const checkOverlap = (carId, startTime, endTime, bookings, excludeBookingId = nu
   });
 };
 
+const checkDriverOverlap = (driver, startTime, endTime, bookings, excludeBookingId = null) => {
+  if (!driver || !driver.trim()) return false;
+  const start = new Date(startTime);
+  const end = new Date(endTime);
+
+  return bookings.some(b => {
+    if (!b.driver || b.driver.trim() !== driver.trim()) return false;
+    if (excludeBookingId && b.id === excludeBookingId) return false;
+    if (b.status === 'rejected' || b.status === 'cancelled') return false;
+
+    const bStart = new Date(b.startTime);
+    const bEnd = new Date(b.endTime);
+
+    // Overlap condition
+    return (start < bEnd && end > bStart);
+  });
+};
+
 // --- EXPRESS ROUTING REST APIs ---
 
 // Root Status Route
@@ -668,6 +712,11 @@ app.post('/api/bookings', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'ขออภัย รถยนต์คันนี้มีผู้จองแล้วในช่วงเวลาดังกล่าว กรุณาเลือกเวลาอื่นหรือรถยนต์คันอื่น' });
     }
 
+    const isDriverOverlapping = checkDriverOverlap(driver, startTime, endTime, bookings);
+    if (isDriverOverlapping) {
+      return res.status(400).json({ message: `ขออภัย พนักงานขับรถ (${driver}) ติดงานอื่นในช่วงเวลาดังกล่าว กรุณาเลือกพนักงานขับรถคนอื่นหรือเปลี่ยนเวลา` });
+    }
+
     const newBooking = {
       id: 'b_' + Date.now(),
       userId: req.user.id,
@@ -768,7 +817,12 @@ app.post('/api/bookings/:id/approve', authenticateToken, requireRole(['admin', '
 
     const isOverlapping = checkOverlap(booking.carId, booking.startTime, booking.endTime, bookings, booking.id);
     if (isOverlapping) {
-      return res.status(400).json({ message: 'ไม่สามารถอนุมัติได้เนื่องจากมีรายการจองอื่นที่ได้รับอนุมัติแล้วในช่วงเวลาเดียวกัน' });
+      return res.status(400).json({ message: 'ไม่สามารถอนุมัติได้เนื่องจากมีรายการจองรถยนต์คันนี้ในช่วงเวลาเดียวกันได้รับการอนุมัติแล้ว' });
+    }
+
+    const isDriverOverlapping = checkDriverOverlap(booking.driver, booking.startTime, booking.endTime, bookings, booking.id);
+    if (isDriverOverlapping) {
+      return res.status(400).json({ message: `ไม่สามารถอนุมัติได้เนื่องจากพนักงานขับรถ (${booking.driver}) ติดงานอื่นในช่วงเวลาเดียวกัน` });
     }
 
     const noteText = notes || 'ได้รับการอนุมัติ';
@@ -925,6 +979,16 @@ app.post('/api/admin/users/:id/suspend', authenticateToken, requireRole(['admin'
     res.json({ message: 'ระงับบัญชีผู้ใช้งานเรียบร้อยแล้ว' });
   } catch (err) {
     res.status(500).json({ message: err.message || 'ไม่สามารถระงับบัญชีใช้งานได้' });
+  }
+});
+
+// Admin reset system database
+app.post('/api/admin/reset-system', authenticateToken, requireRole(['admin']), async (req, res) => {
+  try {
+    await db.resetSystem();
+    res.json({ message: 'ล้างข้อมูลในระบบและสิทธิ์ผู้ใช้งานทั้งหมดเรียบร้อยแล้ว' });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการล้างระบบข้อมูล' });
   }
 });
 

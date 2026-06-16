@@ -48,6 +48,9 @@ export default function App() {
   const [quickBookingText, setQuickBookingText] = useState('');
   const [parsedResults, setParsedResults] = useState([]);
 
+  // State for Admin System Reset
+  const [confirmResetText, setConfirmResetText] = useState('');
+
   const THAI_MONTHS = [
     'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
     'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
@@ -289,6 +292,29 @@ export default function App() {
       fetchDashboardData();
     } catch (err) {
       addToast(err.message, 'danger');
+    }
+  };
+
+  const handleSystemReset = async () => {
+    if (confirmResetText !== 'RESET') return;
+    if (!window.confirm('คำเตือน: ข้อมูลการจองและบัญชีผู้ใช้อื่นทั้งหมดจะถูกลบถาวร ต้องการดำเนินการต่อหรือไม่?')) return;
+    
+    setLoading(true);
+    try {
+      const res = await api.resetSystem();
+      addToast(res.message || 'ล้างระบบข้อมูลสำเร็จแล้ว', 'success');
+      setConfirmResetText('');
+      setAdminSubTab('booking-requests');
+      setActiveTab('dashboard');
+      // Refresh all data
+      fetchDashboardData();
+      if (user?.role === 'admin') {
+        fetchAdminData();
+      }
+    } catch (err) {
+      addToast(err.message, 'danger');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1117,6 +1143,15 @@ export default function App() {
                   >
                     ปรับปรุงสถานะรถยนต์
                   </button>
+                  {user?.role === 'admin' && (
+                    <button
+                      className={`btn ${adminSubTab === 'system-reset' ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{ padding: '6px 14px', fontSize: '0.85rem', color: 'var(--danger)', borderColor: 'var(--danger-glow)' }}
+                      onClick={() => setAdminSubTab('system-reset')}
+                    >
+                      ⚠️ ล้างระบบข้อมูลจริง
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1300,6 +1335,71 @@ export default function App() {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Sub-Tab 4: System Reset (Admin Only) */}
+              {adminSubTab === 'system-reset' && user?.role === 'admin' && (
+                <div style={{ maxWidth: '600px', margin: '0 auto', padding: '20px 0' }}>
+                  <div style={{
+                    border: '1px solid rgba(239, 68, 68, 0.4)',
+                    background: 'rgba(239, 68, 68, 0.05)',
+                    borderRadius: '12px',
+                    padding: '24px',
+                    textAlign: 'center'
+                  }}>
+                    <span style={{ fontSize: '3rem' }}>⚠️</span>
+                    <h4 style={{ fontWeight: '700', color: 'var(--danger)', fontSize: '1.2rem', marginTop: '12px', marginBottom: '16px' }}>
+                      ต้องการล้างค่าข้อมูลในระบบทั้งหมดเพื่อเริ่มใช้ข้อมูลจริง?
+                    </h4>
+                    <p style={{ fontSize: '0.9rem', lineHeight: '1.6', color: 'var(--text-main)', marginBottom: '20px' }}>
+                      การล้างระบบจะทำการลบข้อมูลการจองรถยนต์ทั้งหมด รวมถึงลบบัญชีผู้ใช้งานอื่น ๆ ทั้งหมด (ที่เพิ่งสมัครเข้ามา) ออกจากฐานข้อมูลถาวร เพื่อให้ระบบว่างพร้อมใช้สำหรับงานจริง
+                    </p>
+                    
+                    <div style={{ textAlign: 'left', background: 'rgba(0, 0, 0, 0.2)', padding: '16px', borderRadius: '8px', marginBottom: '20px' }}>
+                      <h5 style={{ fontWeight: '600', marginBottom: '8px', color: 'var(--text-muted)' }}>ข้อมูลที่ระบบจะเก็บรักษาไว้:</h5>
+                      <ul style={{ fontSize: '0.85rem', color: 'var(--text-muted)', paddingLeft: '20px', lineHeight: '1.6' }}>
+                        <li>บัญชีผู้ดูแลระบบหลัก (admin)</li>
+                        <li>บัญชีเจ้าหน้าที่จัดคิวรถ (scheduler)</li>
+                        <li>บัญชีผู้ใช้งานเริ่มต้น (user)</li>
+                        <li>ข้อมูลรถยนต์ส่วนกลางทั้ง 5 คัน (จะถูกรีเซ็ตสถานะเป็น วิ่งงานปกติ ทั้งหมด)</li>
+                      </ul>
+                    </div>
+
+                    <div className="form-group" style={{ textAlign: 'left', marginBottom: '20px' }}>
+                      <label style={{ fontWeight: '600', marginBottom: '8px', display: 'block', color: 'var(--text-main)' }}>
+                        กรุณาพิมพ์คำว่า <code style={{ color: 'var(--danger)', fontSize: '1rem', background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px' }}>RESET</code> เพื่อยืนยันการดำเนินการ:
+                      </label>
+                      <input
+                        type="text"
+                        className="input-field"
+                        placeholder="พิมพ์ RESET ตรงนี้"
+                        value={confirmResetText}
+                        onChange={(e) => setConfirmResetText(e.target.value)}
+                        style={{ textAlign: 'center', fontSize: '1.1rem', letterSpacing: '2px', borderColor: confirmResetText === 'RESET' ? 'var(--danger)' : 'var(--border-color)', width: '100%', padding: '10px', background: 'rgba(0,0,0,0.2)', color: 'var(--text-main)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => setAdminSubTab('booking-requests')}
+                        style={{ padding: '8px 20px' }}
+                      >
+                        ยกเลิก
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        disabled={confirmResetText !== 'RESET' || loading}
+                        onClick={handleSystemReset}
+                        style={{ padding: '8px 20px', background: confirmResetText === 'RESET' ? 'var(--danger)' : 'rgba(239, 68, 68, 0.2)', borderColor: confirmResetText === 'RESET' ? 'var(--danger)' : 'transparent', color: confirmResetText === 'RESET' ? '#ffffff' : 'rgba(255,255,255,0.4)' }}
+                      >
+                        {loading ? 'กำลังล้างระบบ...' : 'ยืนยันล้างข้อมูลระบบ'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
