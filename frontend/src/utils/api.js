@@ -203,8 +203,8 @@ export const generateICSFileLink = (booking) => {
   const end = formatTimeICS(booking.endTime);
   const now = formatTimeICS(new Date().toISOString());
   
-  const title = `🚗 จองรถ: ${booking.carModel}`;
-  const details = `วัตถุประสงค์: ${booking.purpose}\\nผู้จอง: ${booking.userName}\\nผู้อนุมัติ: ${booking.approvedBy || 'ไม่ระบุ'}`;
+  const title = `🚗 จองรถ: ${booking.carModel} | คนขับ: ${booking.driver || 'ไม่ระบุ'} | วัตถุประสงค์: ${booking.purpose}`;
+  const details = `วัตถุประสงค์: ${booking.purpose}\\nผู้จอง: ${booking.userName}\\nผู้อนุมัติ: ${booking.approvedBy || 'ไม่ระบุ'}\\nคนขับ: ${booking.driver || 'ไม่ระบุ'}`;
 
   const icsLines = [
     'BEGIN:VCALENDAR',
