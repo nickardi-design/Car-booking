@@ -1110,6 +1110,27 @@ const sendLINEReply = async (replyToken, messageText) => {
   }
 };
 
+const getLINEDisplayName = async (userId) => {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!token) return null;
+
+  try {
+    const res = await fetch(`https://api.line.me/v2/bot/profile/${userId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.displayName;
+    }
+  } catch (err) {
+    console.error("Error fetching LINE display name:", err);
+  }
+  return null;
+};
+
 const parseLINEBookingText = (text) => {
   const lineText = text.trim();
   
@@ -1286,6 +1307,10 @@ app.post('/api/line/webhook', async (req, res) => {
 
     await db.saveBooking(newBooking);
 
+    // Fetch LINE Profile Display Name to show in LINE response
+    const lineDisplayName = await getLINEDisplayName(lineUserId);
+    const bookingUserName = lineDisplayName || user.name;
+
     // Format reply message
     const formattedDate = formatThaiDate(parsed.startTime.split('T')[0]);
     const startHour = parsed.startTime.split('T')[1];
@@ -1293,7 +1318,7 @@ app.post('/api/line/webhook', async (req, res) => {
     const car = parsed.carId ? cars.find(c => c.id === parsed.carId) : null;
     
     let confirmMsg = `✅ ส่งคำขอจองรถยนต์สำเร็จแล้ว! (รออนุมัติ)\n`;
-    confirmMsg += `👤 ผู้จอง: ${user.name}\n`;
+    confirmMsg += `👤 ผู้จอง: ${bookingUserName}\n`;
     confirmMsg += `📅 วันเดินทาง: ${formattedDate}\n`;
     confirmMsg += `⏰ เวลา: ${startHour} - ${endHour} น.\n`;
     confirmMsg += `🚗 รถยนต์: ${car ? car.model : '⏳ รอเจ้าหน้าที่จัดสรรรถยนต์'}\n`;
