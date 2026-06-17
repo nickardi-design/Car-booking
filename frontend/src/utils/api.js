@@ -162,9 +162,20 @@ export const api = {
     });
   },
   linkLineUser: (lineUserId) => {
-    return request('/auth/link-line', {
+    return request('/auth/line-links', {
       method: 'POST',
       body: JSON.stringify({ lineUserId }),
+    });
+  },
+  addLineLink: (lineUserId) => {
+    return request('/auth/line-links', {
+      method: 'POST',
+      body: JSON.stringify({ lineUserId }),
+    });
+  },
+  deleteLineLink: (id) => {
+    return request(`/auth/line-links/${id}`, {
+      method: 'DELETE',
     });
   },
 };

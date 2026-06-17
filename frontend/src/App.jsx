@@ -53,6 +53,10 @@ export default function App() {
   // State for Admin System Reset
   const [confirmResetText, setConfirmResetText] = useState('');
 
+  // States for 1-to-many LINE account links
+  const [showLineLinksModal, setShowLineLinksModal] = useState(false);
+  const [newLineUserId, setNewLineUserId] = useState('');
+
   const THAI_MONTHS = [
     'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
     'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
@@ -246,21 +250,33 @@ export default function App() {
     addToast('ออกจากระบบเรียบร้อยแล้ว', 'info');
   };
 
-  const handleLinkLineAccount = async () => {
-    const lineUserId = window.prompt(
-      'กรุณากรอก LINE User ID ของคุณ\n\n' +
-      'คุณสามารถหารหัสได้จากการพิมพ์ส่งคำว่า "id" (ตัวเล็กทั้งหมด) เข้าไปที่ไลน์กลุ่ม/บอทแชท'
-    );
-    if (lineUserId === null) return;
-    if (!lineUserId.trim()) {
+  const handleAddLineLink = async (e) => {
+    e.preventDefault();
+    if (!newLineUserId.trim()) {
       addToast('กรุณากรอก LINE User ID ที่ถูกต้อง', 'danger');
       return;
     }
+
     setLoading(true);
     try {
-      const res = await api.linkLineUser(lineUserId.trim());
+      const res = await api.addLineLink(newLineUserId.trim());
       addToast(res.message || 'ผูกบัญชี LINE สำเร็จแล้ว!', 'success');
-      fetchUserData();
+      setNewLineUserId('');
+      await fetchUserData(); // reload user data to get updated lineLinks list
+    } catch (err) {
+      addToast(err.message, 'danger');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteLineLink = async (id) => {
+    if (!window.confirm('คุณต้องการยกเลิกการเชื่อมโยงบัญชี LINE นี้ใช่หรือไม่?')) return;
+    setLoading(true);
+    try {
+      const res = await api.deleteLineLink(id);
+      addToast(res.message || 'ยกเลิกการเชื่อมโยงบัญชี LINE สำเร็จ!', 'success');
+      await fetchUserData(); // reload list
     } catch (err) {
       addToast(err.message, 'danger');
     } finally {
@@ -773,46 +789,25 @@ export default function App() {
             <span className={`badge badge-${user?.role}`} style={{ fontSize: '0.65rem', padding: '2px 6px' }}>{user?.role}</span>
           </div>
 
-          {user?.lineUserId ? (
-            <span 
-              className="badge" 
-              style={{ 
-                background: 'rgba(6, 199, 85, 0.15)', 
-                color: '#06C755', 
-                border: '1px solid rgba(6, 199, 85, 0.3)',
-                padding: '6px 10px',
-                fontSize: '0.8rem',
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                fontWeight: '600'
-              }}
-              title={`LINE ID: ${user.lineUserId}`}
-            >
-              ✅ LINE เชื่อมต่อแล้ว
-            </span>
-          ) : (
-            <button 
-              className="btn" 
-              onClick={handleLinkLineAccount}
-              style={{ 
-                padding: '6px 12px', 
-                fontSize: '0.8rem', 
-                background: '#06C755', 
-                color: '#ffffff', 
-                border: 'none',
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                fontWeight: '600',
-                cursor: 'pointer'
-              }}
-            >
-              💬 ผูกบัญชี LINE
-            </button>
-          )}
+          <button 
+            className="btn" 
+            onClick={() => setShowLineLinksModal(true)}
+            style={{ 
+              padding: '8px 12px', 
+              fontSize: '0.8rem', 
+              background: '#06C755', 
+              color: '#ffffff', 
+              border: 'none',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontWeight: '600',
+              cursor: 'pointer'
+            }}
+          >
+            💬 จัดการ LINE {user?.lineLinks?.length > 0 ? `(${user.lineLinks.length})` : ''}
+          </button>
 
           <button className="btn btn-secondary" onClick={handleLogout} style={{ padding: '8px 14px' }}>
             🚪 ออก
@@ -1690,6 +1685,98 @@ export default function App() {
               <button className="btn btn-secondary" onClick={() => setShowRejectModal(false)}>ยกเลิก</button>
               <button className="btn btn-danger" onClick={handleRejectBooking}>ปฏิเสธการจองนี้</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- POPUP MODAL: MANAGE LINE LINKS --- */}
+      {showLineLinksModal && (
+        <div className="modal-overlay">
+          <div className="glass-panel modal-content" style={{ maxWidth: '500px' }}>
+            <div className="modal-header">
+              <h3>💬 จัดการบัญชี LINE ที่เชื่อมโยง</h3>
+              <button className="modal-close-btn" onClick={() => { setShowLineLinksModal(false); setNewLineUserId(''); }}>×</button>
+            </div>
+            
+            <div style={{ marginBottom: '20px' }}>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '14px' }}>
+                คุณสามารถเชื่อมโยงบัญชี LINE ได้หลายบัญชี เพื่อให้สามารถสั่งจองรถยนต์ผ่านแชตกลุ่มไลน์จากบัญชีไลน์ที่แตกต่างกันได้ภายใต้สิทธิ์ชื่อบัญชีของคุณ
+              </p>
+              
+              <h4 style={{ fontWeight: '600', fontSize: '0.95rem', marginBottom: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px' }}>
+                รายชื่อไลน์ที่ผูกไว้ในปัจจุบัน ({user?.lineLinks?.length || 0})
+              </h4>
+              
+              {(!user?.lineLinks || user.lineLinks.length === 0) ? (
+                <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text-muted)', fontSize: '0.9rem', background: 'rgba(255,255,255,0.02)', borderRadius: '8px' }}>
+                  ยังไม่มีการเชื่อมโยงบัญชี LINE
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto', marginBottom: '16px' }}>
+                  {user.lineLinks.map(link => (
+                    <div 
+                      key={link.id} 
+                      style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'center', 
+                        background: 'rgba(255,255,255,0.03)', 
+                        padding: '10px 14px', 
+                        borderRadius: '8px',
+                        border: '1px solid rgba(255,255,255,0.05)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <strong style={{ fontSize: '0.9rem', color: '#06C755' }}>🟢 {link.lineDisplayName || 'ผู้ใช้ LINE'}</strong>
+                        <code style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>ID: {link.lineUserId.substring(0, 10)}...</code>
+                      </div>
+                      <button 
+                        className="btn btn-secondary" 
+                        onClick={() => handleDeleteLineLink(link.id)}
+                        style={{ 
+                          padding: '4px 8px', 
+                          fontSize: '0.75rem', 
+                          color: 'var(--danger)', 
+                          borderColor: 'var(--danger-glow)',
+                          minWidth: 'auto'
+                        }}
+                        title="ยกเลิกการผูกบัญชีนี้"
+                      >
+                        🗑️ ลบ
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <form onSubmit={handleAddLineLink} style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+              <div className="form-group" style={{ margin: '0 0 16px 0' }}>
+                <label style={{ fontWeight: '600', marginBottom: '6px', display: 'block' }}>➕ เพิ่มการเชื่อมโยงบัญชี LINE ใหม่</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="กรอก LINE User ID (ตัวอย่าง U1234...)"
+                    value={newLineUserId}
+                    onChange={(e) => setNewLineUserId(e.target.value)}
+                    required
+                    style={{ flex: '1', padding: '10px' }}
+                  />
+                  <button 
+                    type="submit" 
+                    className="btn" 
+                    style={{ background: '#06C755', color: '#ffffff', border: 'none', padding: '10px 16px', fontWeight: '600' }}
+                    disabled={loading}
+                  >
+                    {loading ? '...' : 'เพิ่ม'}
+                  </button>
+                </div>
+              </div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: '0' }}>
+                * วิธีหาไอดี: ส่งข้อความคำว่า <strong>"id"</strong> ไปในกลุ่มไลน์ที่มีบอทอยู่ บอทจะตอบกลับด้วยรหัสผู้ใช้เพื่อนำมาวางที่นี่
+              </p>
+            </form>
           </div>
         </div>
       )}

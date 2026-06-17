@@ -108,13 +108,52 @@ const db = {
     }
   },
 
-  linkLineUser: async (id, lineUserId) => {
+  getLineLinks: async (userId) => {
     if (usePostgres) {
-      await pgPool.query('UPDATE users SET line_user_id = $1 WHERE id = $2', [lineUserId, id]);
+      const res = await pgPool.query('SELECT * FROM user_line_links WHERE user_id = $1', [userId]);
+      return res.rows;
     } else {
       const data = readDB();
-      const u = data.users.find(x => x.id === id);
-      if (u) u.line_user_id = lineUserId;
+      return (data.userLineLinks || []).filter(l => l.userId === userId);
+    }
+  },
+
+  findUserByLineId: async (lineUserId) => {
+    if (usePostgres) {
+      const res = await pgPool.query(
+        'SELECT u.* FROM users u JOIN user_line_links l ON u.id = l.user_id WHERE l.line_user_id = $1',
+        [lineUserId]
+      );
+      return res.rows[0] || null;
+    } else {
+      const data = readDB();
+      const link = (data.userLineLinks || []).find(l => l.lineUserId === lineUserId);
+      if (!link) return null;
+      return data.users.find(u => u.id === link.userId) || null;
+    }
+  },
+
+  saveLineLink: async (link) => {
+    if (usePostgres) {
+      await pgPool.query(
+        'INSERT INTO user_line_links (id, user_id, line_user_id, line_display_name) VALUES ($1, $2, $3, $4)',
+        [link.id, link.userId, link.lineUserId, link.lineDisplayName || '']
+      );
+    } else {
+      const data = readDB();
+      if (!data.userLineLinks) data.userLineLinks = [];
+      data.userLineLinks.push(link);
+      writeDB(data);
+    }
+  },
+
+  deleteLineLink: async (id) => {
+    if (usePostgres) {
+      await pgPool.query('DELETE FROM user_line_links WHERE id = $1', [id]);
+    } else {
+      const data = readDB();
+      if (!data.userLineLinks) data.userLineLinks = [];
+      data.userLineLinks = data.userLineLinks.filter(x => x.id !== id);
       writeDB(data);
     }
   },
@@ -241,6 +280,7 @@ const db = {
       try {
         await client.query('BEGIN');
         await client.query('TRUNCATE TABLE bookings CASCADE');
+        await client.query('TRUNCATE TABLE user_line_links CASCADE');
         await client.query("DELETE FROM users WHERE username NOT IN ('admin', 'scheduler', 'user')");
         await client.query("UPDATE cars SET status = 'available'");
         await client.query('COMMIT');
@@ -253,6 +293,7 @@ const db = {
     } else {
       const data = readDB();
       data.bookings = [];
+      data.userLineLinks = [];
       data.users = data.users.filter(u => ['admin', 'scheduler', 'user'].includes(u.username));
       data.cars.forEach(c => {
         c.status = 'available';
@@ -312,6 +353,17 @@ const initPostgresDB = async () => {
         notes TEXT,
         approved_by VARCHAR(100),
         driver VARCHAR(100) DEFAULT '',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Create User Line Links Table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_line_links (
+        id VARCHAR(50) PRIMARY KEY,
+        user_id VARCHAR(50) REFERENCES users(id) ON DELETE CASCADE,
+        line_user_id VARCHAR(100) UNIQUE NOT NULL,
+        line_display_name VARCHAR(100),
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -682,6 +734,8 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
     const user = users.find(u => u.id === req.user.id);
     if (!user) return res.status(404).json({ message: 'ไม่พบข้อมูลผู้ใช้' });
 
+    const lineLinks = await db.getLineLinks(req.user.id);
+
     res.json({
       id: user.id,
       username: user.username,
@@ -689,14 +743,14 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
       name: user.name,
       role: user.role,
       status: user.status,
-      lineUserId: user.line_user_id || null
+      lineLinks
     });
   } catch (err) {
     res.status(500).json({ message: err.message || 'ไม่สามารถโหลดข้อมูลสิทธิ์ผู้ใช้ได้' });
   }
 });
 
-// Link LINE account
+// Link LINE account (Alias for backward compatibility)
 app.post('/api/auth/link-line', authenticateToken, async (req, res) => {
   const { lineUserId } = req.body;
   if (!lineUserId || !lineUserId.trim()) {
@@ -704,16 +758,72 @@ app.post('/api/auth/link-line', authenticateToken, async (req, res) => {
   }
 
   try {
-    const users = await db.getUsers();
-    const existingUser = users.find(u => u.line_user_id === lineUserId.trim() && u.id !== req.user.id);
+    const cleanId = lineUserId.trim();
+    const existingUser = await db.findUserByLineId(cleanId);
     if (existingUser) {
       return res.status(400).json({ message: `LINE User ID นี้ถูกใช้ผูกบัญชีกับผู้ใช้อื่นแล้ว (${existingUser.name})` });
     }
 
-    await db.linkLineUser(req.user.id, lineUserId.trim());
+    const displayName = await getLINEDisplayName(cleanId) || 'ผู้ใช้ LINE';
+    const newLink = {
+      id: 'link_' + Date.now(),
+      userId: req.user.id,
+      lineUserId: cleanId,
+      lineDisplayName: displayName,
+      createdAt: new Date().toISOString()
+    };
+
+    await db.saveLineLink(newLink);
     res.json({ message: 'เชื่อมโยงบัญชี LINE ของคุณสำเร็จแล้ว!' });
   } catch (err) {
     res.status(500).json({ message: err.message || 'ไม่สามารถเชื่อมโยงบัญชี LINE ได้' });
+  }
+});
+
+// Create new LINE Link link
+app.post('/api/auth/line-links', authenticateToken, async (req, res) => {
+  const { lineUserId } = req.body;
+  if (!lineUserId || !lineUserId.trim()) {
+    return res.status(400).json({ message: 'กรุณาระบุ LINE User ID' });
+  }
+
+  try {
+    const cleanId = lineUserId.trim();
+    const existingUser = await db.findUserByLineId(cleanId);
+    if (existingUser) {
+      return res.status(400).json({ message: `LINE User ID นี้ถูกใช้เชื่อมโยงกับผู้ใช้อื่นแล้ว (${existingUser.name})` });
+    }
+
+    const displayName = await getLINEDisplayName(cleanId) || 'ผู้ใช้ LINE';
+    const newLink = {
+      id: 'link_' + Date.now(),
+      userId: req.user.id,
+      lineUserId: cleanId,
+      lineDisplayName: displayName,
+      createdAt: new Date().toISOString()
+    };
+
+    await db.saveLineLink(newLink);
+    res.json({ message: 'เชื่อมโยงบัญชี LINE สำเร็จแล้ว!', link: newLink });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'ไม่สามารถเชื่อมโยงบัญชี LINE ได้' });
+  }
+});
+
+// Delete LINE Link link
+app.delete('/api/auth/line-links/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const links = await db.getLineLinks(req.user.id);
+    const hasLink = links.some(l => l.id === id);
+    if (!hasLink) {
+      return res.status(403).json({ message: 'คุณไม่มีสิทธิ์ลบการเชื่อมโยงบัญชี LINE นี้' });
+    }
+
+    await db.deleteLineLink(id);
+    res.json({ message: 'ยกเลิกการเชื่อมโยงบัญชี LINE เรียบร้อยแล้ว' });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'ไม่สามารถยกเลิกการเชื่อมโยงบัญชี LINE ได้' });
   }
 });
 
@@ -1250,11 +1360,10 @@ app.post('/api/line/webhook', async (req, res) => {
   }
 
   try {
-    const users = await db.getUsers();
-    const user = users.find(u => u.line_user_id === lineUserId);
+    const user = await db.findUserByLineId(lineUserId);
 
     if (!user) {
-      const replyMsg = `⚠️ **ยังไม่ได้ผูกบัญชี LINE กับระบบจองรถ**\n\nรหัส LINE User ID ของคุณคือ:\n${lineUserId}\n\n👉 **วิธีเปิดสิทธิ์จอง:**\nกรุณาคัดลอกรหัสนี้ไปใส่ในหน้าเว็บแอป (ปุ่ม "🔗 ผูกบัญชี LINE" ด้านขวาบน) เพื่อยืนยันตัวตนก่อนจองค่ะ`;
+      const replyMsg = `⚠️ **ยังไม่ได้ผูกบัญชี LINE กับระบบจองรถ**\n\nรหัส LINE User ID ของคุณคือ:\n${lineUserId}\n\n👉 **วิธีเปิดสิทธิ์จอง:**\nกรุณาคัดลอกรหัสนี้ไปใส่ในหน้าเว็บแอป (ปุ่ม "💬 จัดการ LINE" ด้านขวาบน) เพื่อยืนยันตัวตนก่อนจองค่ะ`;
       await sendLINEReply(replyToken, replyMsg);
       return res.sendStatus(200);
     }
