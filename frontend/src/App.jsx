@@ -764,18 +764,19 @@ export default function App() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
                 <h3 style={{ fontSize: '1.25rem', fontWeight: '700', margin: '0' }}>📅 รายการจองรถยนต์ในระบบทั้งหมด (เรียงจากวันที่ล่าสุด)</h3>
                 <span className="badge badge-info" style={{ fontSize: '0.8rem', padding: '4px 10px' }}>
-                  ทั้งหมด: {bookings.length} รายการ
+                  ทั้งหมด: {bookings.filter(b => b.status === 'approved' || b.status === 'pending').length} รายการ
                 </span>
               </div>
 
-              {bookings.length === 0 ? (
+              {bookings.filter(b => b.status === 'approved' || b.status === 'pending').length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                   ไม่มีรายการจองรถยนต์ในระบบ
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '450px', overflowY: 'auto', paddingRight: '6px' }}>
                   {[...bookings]
-                    .sort((a, b) => new Date(b.startTime) - new Date(a.startTime)) // เรียงจากล่าสุดด้านบน (descending)
+                    .filter(b => b.status === 'approved' || b.status === 'pending') // กรองเฉพาะรายการที่ใช้งานจริง (อนุมัติแล้ว หรือ รออนุมัติ)
+                    .sort((a, b) => b.startTime.localeCompare(a.startTime)) // จัดเรียงแบบตัวอักษรเพื่อหลีกเลี่ยงปัญหา Date parsing บนเบราว์เซอร์
                     .map(b => {
                       const car = cars.find(c => c.id === b.carId);
                       const carType = car ? car.type : 'van';
@@ -803,7 +804,7 @@ export default function App() {
                             </span>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                               <div style={{ fontWeight: '700', fontSize: '1rem', color: 'var(--text-main)' }}>
-                                {b.carModel}
+                                {b.carModel || 'ไม่พบข้อมูลรถยนต์'}
                               </div>
                               <div style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: '600' }}>
                                 📅 {formatThaiDateTime(b.startTime)} - {b.endTime.split('T')[1]?.substring(0, 5) || ''} น.
@@ -813,7 +814,7 @@ export default function App() {
                               </div>
                               <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '4px', fontSize: '0.8rem' }}>
                                 {b.driver && <span style={{ color: 'var(--info)' }}>👤 คนขับ: {b.driver}</span>}
-                                <span style={{ color: 'var(--text-muted)' }}>👤 ผู้จอง: {b.userName}</span>
+                                <span style={{ color: 'var(--text-muted)' }}>👤 ผู้จอง: {b.userName || 'ไม่ระบุผู้ใช้'}</span>
                               </div>
                             </div>
                           </div>

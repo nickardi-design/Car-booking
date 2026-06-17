@@ -127,8 +127,8 @@ const db = {
       const res = await pgPool.query(`
         SELECT b.*, u.name as "userName", u.email as "userEmail", c.model as "carModel", c.image as "carImage"
         FROM bookings b
-        JOIN users u ON b.user_id = u.id
-        JOIN cars c ON b.car_id = c.id
+        LEFT JOIN users u ON b.user_id = u.id
+        LEFT JOIN cars c ON b.car_id = c.id
         ORDER BY b.start_time ASC
       `);
       return res.rows.map(row => ({
