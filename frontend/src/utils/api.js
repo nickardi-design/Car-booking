@@ -125,10 +125,10 @@ export const api = {
       method: 'POST',
     });
   },
-  approveBooking: (id, notes) => {
+  approveBooking: (id, notes, carId = undefined, driver = undefined) => {
     return request(`/bookings/${id}/approve`, {
       method: 'POST',
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify({ notes, carId, driver }),
     });
   },
   rejectBooking: (id, notes) => {
@@ -159,6 +159,12 @@ export const api = {
   resetSystem: () => {
     return request('/admin/reset-system', {
       method: 'POST',
+    });
+  },
+  linkLineUser: (lineUserId) => {
+    return request('/auth/link-line', {
+      method: 'POST',
+      body: JSON.stringify({ lineUserId }),
     });
   },
 };
