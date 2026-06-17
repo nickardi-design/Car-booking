@@ -38,6 +38,8 @@ export default function App() {
   const [bookingEnd, setBookingEnd] = useState('');
   const [bookingPurpose, setBookingPurpose] = useState('');
   const [bookingDriver, setBookingDriver] = useState('นายสุรศักดิ์ ชาแท่น');
+  const [selectedCarsForApproval, setSelectedCarsForApproval] = useState({});
+  const [selectedDriversForApproval, setSelectedDriversForApproval] = useState({});
   
   // Custom Thai Date States for independent visual inline calendar selection (วัน เดือน ปี พ.ศ.)
   const [bookingDate, setBookingDate] = useState(new Date().toISOString().split('T')[0]);
@@ -242,6 +244,28 @@ export default function App() {
     setToken('');
     logout();
     addToast('ออกจากระบบเรียบร้อยแล้ว', 'info');
+  };
+
+  const handleLinkLineAccount = async () => {
+    const lineUserId = window.prompt(
+      'กรุณากรอก LINE User ID ของคุณ\n\n' +
+      'คุณสามารถหารหัสได้จากการพิมพ์ส่งคำว่า "id" (ตัวเล็กทั้งหมด) เข้าไปที่ไลน์กลุ่ม/บอทแชท'
+    );
+    if (lineUserId === null) return;
+    if (!lineUserId.trim()) {
+      addToast('กรุณากรอก LINE User ID ที่ถูกต้อง', 'danger');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await api.linkLineUser(lineUserId.trim());
+      addToast(res.message || 'ผูกบัญชี LINE สำเร็จแล้ว!', 'success');
+      fetchUserData();
+    } catch (err) {
+      addToast(err.message, 'danger');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Submit Booking request
@@ -471,9 +495,18 @@ export default function App() {
 
   // Admin/Scheduler Approve Booking
   const handleApproveBooking = async (id) => {
-    if (!window.confirm('กรุณาตรวจสอบความถูกต้องของข้อมูล')) return;
+    const booking = bookings.find(b => b.id === id);
+    const allocatedCarId = selectedCarsForApproval[id] !== undefined ? selectedCarsForApproval[id] : (booking?.carId || '');
+    const allocatedDriver = selectedDriversForApproval[id] !== undefined ? selectedDriversForApproval[id] : (booking?.driver || '');
+
+    if (!allocatedCarId) {
+      addToast('กรุณาเลือกจัดสรรรถยนต์ก่อนกดยืนยันอนุมัติ', 'warning');
+      return;
+    }
+
+    if (!window.confirm('ยืนยันการอนุมัติการจองและจัดสรรยานพาหนะใช่หรือไม่?')) return;
     try {
-      const res = await api.approveBooking(id, '');
+      const res = await api.approveBooking(id, '', allocatedCarId, allocatedDriver);
       addToast(res.message, 'success');
       fetchDashboardData();
     } catch (err) {
@@ -740,6 +773,47 @@ export default function App() {
             <span className={`badge badge-${user?.role}`} style={{ fontSize: '0.65rem', padding: '2px 6px' }}>{user?.role}</span>
           </div>
 
+          {user?.lineUserId ? (
+            <span 
+              className="badge" 
+              style={{ 
+                background: 'rgba(6, 199, 85, 0.15)', 
+                color: '#06C755', 
+                border: '1px solid rgba(6, 199, 85, 0.3)',
+                padding: '6px 10px',
+                fontSize: '0.8rem',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontWeight: '600'
+              }}
+              title={`LINE ID: ${user.lineUserId}`}
+            >
+              ✅ LINE เชื่อมต่อแล้ว
+            </span>
+          ) : (
+            <button 
+              className="btn" 
+              onClick={handleLinkLineAccount}
+              style={{ 
+                padding: '6px 12px', 
+                fontSize: '0.8rem', 
+                background: '#06C755', 
+                color: '#ffffff', 
+                border: 'none',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontWeight: '600',
+                cursor: 'pointer'
+              }}
+            >
+              💬 ผูกบัญชี LINE
+            </button>
+          )}
+
           <button className="btn btn-secondary" onClick={handleLogout} style={{ padding: '8px 14px' }}>
             🚪 ออก
           </button>
@@ -775,7 +849,7 @@ export default function App() {
                     .sort((a, b) => (b.startTime || '').localeCompare(a.startTime || '')) // จัดเรียงแบบตัวอักษรเพื่อหลีกเลี่ยงปัญหา Date parsing บนเบราว์เซอร์ และป้องกันการแครชถ้าไม่มีฟิลด์ startTime
                     .map(b => {
                       const car = cars.find(c => c.id === b.carId);
-                      const carType = car ? car.type : 'van';
+                      const carType = car ? car.type : null;
                       return (
                         <div 
                           key={b.id} 
@@ -796,11 +870,11 @@ export default function App() {
                         >
                           <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flex: '1', minWidth: '280px' }}>
                             <span style={{ fontSize: '2rem', background: 'rgba(255,255,255,0.03)', padding: '10px', borderRadius: '50%', width: '50px', height: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              {getCarIcon(carType)}
+                              {carType ? getCarIcon(carType) : '❓'}
                             </span>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                               <div style={{ fontWeight: '700', fontSize: '1rem', color: 'var(--text-main)', lineHeight: '1.4' }}>
-                                {b.driver || 'ไม่ระบุคนขับ'} {b.carModel || 'ไม่พบข้อมูลรถยนต์'} {b.purpose}
+                                {(b.driver || '⏳ รอจัดสรรคนขับ')} {(b.carModel || '⏳ รอจัดสรรรถยนต์')} {b.purpose}
                               </div>
                               <div style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: '600' }}>
                                 📅 {formatThaiDateTime(b.startTime)} - {b.endTime.split('T')[1]?.substring(0, 5) || ''} น.
@@ -972,49 +1046,75 @@ export default function App() {
         {/* 2. MY BOOKINGS VIEW */}
         {activeTab === 'my-bookings' && !loading && (
           <div style={{ padding: '24px 5%', maxWidth: '1000px', margin: '0 auto' }}>
-            <div className="glass-panel">
-              <h3 style={{ fontSize: '1.3rem', fontWeight: '700', marginBottom: '16px' }}>📅 รายการประวัติจองรถยนต์ของฉัน</h3>
+            <div className="glass-panel" style={{ padding: '24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: '700', margin: '0' }}>📅 รายการประวัติจองรถยนต์ของฉัน</h3>
+                <span className="badge badge-info" style={{ fontSize: '0.8rem', padding: '4px 10px' }}>
+                  ทั้งหมด: {bookings.filter(b => b.userId === user?.id).length} รายการ
+                </span>
+              </div>
               
               {bookings.filter(b => b.userId === user?.id).length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                   คุณยังไม่มีคำขอจองรถยนต์ในระบบ กดที่แถบ "แผงจองรถ" เพื่อทำเรื่องขออนุมัติจองได้ทันที
                 </div>
               ) : (
-                <div className="admin-table-container">
-                  <table className="admin-table">
-                    <thead>
-                      <tr>
-                        <th>วันเดินทาง</th>
-                        <th>รถยนต์ที่เลือก</th>
-                        <th>ช่วงเวลาจอง</th>
-                        <th>วัตถุประสงค์การใช้รถ</th>
-                        <th>สถานะการจอง</th>
-                        <th>การอนุมัติ / หมายเหตุ</th>
-                        <th>จัดการ</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {bookings.filter(b => b.userId === user?.id).map(b => (
-                        <tr key={b.id}>
-                          <td><strong>{formatThaiDate(b.startTime)}</strong></td>
-                          <td>{getCarIcon(b.carImage ? b.carImage.replace(/[a-z_]+/g, 'van') : 'van')} {b.carModel}</td>
-                          <td>{b.startTime.split('T')[1].substring(0, 5)} - {b.endTime.split('T')[1].substring(0, 5)} น.</td>
-                          <td>
-                            {b.purpose}
-                            {b.driver && <div style={{ fontSize: '0.8rem', color: 'var(--primary)', marginTop: '4px' }}>👤 คนขับ: {b.driver}</div>}
-                          </td>
-                          <td>
-                            <span className={`badge badge-${b.status}`}>
-                              {b.status === 'pending' ? 'รอพิจารณา' : b.status === 'approved' ? 'อนุมัติแล้ว' : b.status === 'rejected' ? 'ปฏิเสธคำขอ' : 'ยกเลิกคำขอ'}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '550px', overflowY: 'auto', paddingRight: '6px' }}>
+                  {[...bookings]
+                    .filter(b => b.userId === user?.id)
+                    .sort((a, b) => (b.startTime || '').localeCompare(a.startTime || ''))
+                    .map(b => {
+                      const car = cars.find(c => c.id === b.carId);
+                      const carType = car ? car.type : null;
+                      return (
+                        <div 
+                          key={b.id} 
+                          className="glass-panel" 
+                          style={{ 
+                            margin: '0', 
+                            padding: '16px 20px', 
+                            background: 'rgba(255, 255, 255, 0.01)', 
+                            border: '1px solid rgba(255, 255, 255, 0.05)',
+                            borderRadius: '10px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: '16px',
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flex: '1', minWidth: '280px' }}>
+                            <span style={{ fontSize: '2rem', background: 'rgba(255,255,255,0.03)', padding: '10px', borderRadius: '50%', width: '50px', height: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {carType ? getCarIcon(carType) : '❓'}
                             </span>
-                          </td>
-                          <td>
-                            {b.status === 'approved' && <div style={{ fontSize: '0.8rem', color: 'var(--success)' }}>อนุมัติโดย: {b.approvedBy}</div>}
-                            {b.status === 'rejected' && <div style={{ fontSize: '0.8rem', color: 'var(--danger)' }}>เหตุผล: {b.notes}</div>}
-                            {b.status === 'pending' && <span style={{ color: 'var(--text-muted)' }}>รอดำเนินการ</span>}
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '130px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              <div style={{ fontWeight: '700', fontSize: '1rem', color: 'var(--text-main)', lineHeight: '1.4' }}>
+                                {(b.driver || '⏳ รอจัดสรรคนขับ')} {(b.carModel || '⏳ รอจัดสรรรถยนต์')} {b.purpose}
+                              </div>
+                              <div style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: '600' }}>
+                                📅 {formatThaiDateTime(b.startTime)} - {b.endTime.split('T')[1]?.substring(0, 5) || ''} น.
+                              </div>
+                              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                <span>👤 ผู้ขอจอง: {b.userName || 'ไม่ระบุผู้ใช้'}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', minWidth: '120px' }}>
+                              <span className={`badge badge-${b.status}`} style={{ padding: '6px 12px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: '700' }}>
+                                {b.status === 'pending' ? 'รอพิจารณา' : b.status === 'approved' ? 'อนุมัติแล้ว' : b.status === 'rejected' ? 'ปฏิเสธคำขอ' : 'ยกเลิกคำขอ'}
+                              </span>
+                              {b.status === 'approved' && b.approvedBy && (
+                                <span style={{ fontSize: '0.75rem', color: 'var(--success)' }}>อนุมัติโดย: {b.approvedBy}</span>
+                              )}
+                              {b.status === 'rejected' && b.notes && (
+                                <span style={{ fontSize: '0.75rem', color: 'var(--danger)', maxWidth: '180px', textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={b.notes}>เหตุผล: {b.notes}</span>
+                              )}
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                               {b.status === 'approved' && (
                                 <a
                                   href={generateICSFileLink(b)}
@@ -1028,18 +1128,17 @@ export default function App() {
                               {(b.status === 'pending' || b.status === 'approved') && (
                                 <button
                                   className="btn btn-secondary"
-                                  style={{ padding: '4px 8px', fontSize: '0.8rem', color: 'var(--danger)', borderColor: 'var(--danger-glow)' }}
+                                  style={{ padding: '6px 10px', fontSize: '0.75rem', color: 'var(--danger)', borderColor: 'var(--danger-glow)' }}
                                   onClick={() => handleCancelBooking(b.id)}
                                 >
                                   ยกเลิกการจอง
                                 </button>
                               )}
                             </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                          </div>
+                        </div>
+                      );
+                    })}
                 </div>
               )}
             </div>
@@ -1104,35 +1203,64 @@ export default function App() {
                         <thead>
                           <tr>
                             <th>ผู้ขอจอง</th>
-                            <th>ประเภท / รุ่นรถ</th>
-                            <th>วันที่เดินทาง</th>
-                            <th>ช่วงเวลา</th>
+                            <th>จัดสรรรถยนต์</th>
+                            <th>จัดสรรพนักงานขับรถ</th>
+                            <th>วันเดินทาง / ช่วงเวลา</th>
                             <th>วัตถุประสงค์การใช้รถ</th>
-                            <th>อนุมัติ / ปฏิเสธ</th>
+                            <th>การจัดการ</th>
                           </tr>
                         </thead>
                         <tbody>
                           {bookings.filter(b => b.status === 'pending').map(b => (
                             <tr key={b.id}>
                               <td><strong>{b.userName}</strong></td>
-                              <td>{b.carModel}</td>
-                              <td>{formatThaiDate(b.startTime)}</td>
-                              <td>{b.startTime.split('T')[1].substring(0, 5)} - {b.endTime.split('T')[1].substring(0, 5)} น.</td>
                               <td>
-                            {b.purpose}
-                            {b.driver && <div style={{ fontSize: '0.8rem', color: 'var(--primary)', marginTop: '4px' }}>👤 คนขับ: {b.driver}</div>}
-                          </td>
+                                <select
+                                  className="input-field"
+                                  style={{ padding: '6px', fontSize: '0.85rem', minWidth: '180px' }}
+                                  value={selectedCarsForApproval[b.id] !== undefined ? selectedCarsForApproval[b.id] : (b.carId || '')}
+                                  onChange={(e) => setSelectedCarsForApproval(prev => ({ ...prev, [b.id]: e.target.value }))}
+                                >
+                                  <option value="">-- เลือกจัดสรรรถยนต์ --</option>
+                                  {cars.map(c => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.model} ({c.color})
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td>
+                                <select
+                                  className="input-field"
+                                  style={{ padding: '6px', fontSize: '0.85rem', minWidth: '180px' }}
+                                  value={selectedDriversForApproval[b.id] !== undefined ? selectedDriversForApproval[b.id] : (b.driver || '')}
+                                  onChange={(e) => setSelectedDriversForApproval(prev => ({ ...prev, [b.id]: e.target.value }))}
+                                >
+                                  <option value="">-- เลือกพนักงานขับรถ --</option>
+                                  <option value="นายสุรศักดิ์ ชาแท่น">นายสุรศักดิ์ ชาแท่น</option>
+                                  <option value="นายสุระเชษฐ วิบูลพันธุ์">นายสุระเชษฐ วิบูลพันธุ์</option>
+                                  <option value="นายวิไล พลรักษา">นายวิไล พลรักษา</option>
+                                  <option value="นายเฉลิมพล ชมเชย">นายเฉลิมพล ชมเชย</option>
+                                </select>
+                              </td>
+                              <td>
+                                <div><strong>{formatThaiDate(b.startTime)}</strong></div>
+                                <div style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: '600', marginTop: '2px' }}>
+                                  {b.startTime.split('T')[1].substring(0, 5)} - {b.endTime.split('T')[1].substring(0, 5)} น.
+                                </div>
+                              </td>
+                              <td>{b.purpose}</td>
                               <td style={{ display: 'flex', gap: '8px' }}>
                                 <button
                                   className="btn btn-success"
-                                  style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+                                  style={{ padding: '8px 14px', fontSize: '0.8rem', fontWeight: '600' }}
                                   onClick={() => handleApproveBooking(b.id)}
                                 >
                                   อนุมัติ
                                 </button>
                                 <button
                                   className="btn btn-danger"
-                                  style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+                                  style={{ padding: '8px 14px', fontSize: '0.8rem', fontWeight: '600' }}
                                   onClick={() => openRejectModal(b)}
                                 >
                                   ปฏิเสธคำขอ

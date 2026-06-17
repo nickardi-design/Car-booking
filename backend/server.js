@@ -76,8 +76,8 @@ const db = {
   saveUser: async (user) => {
     if (usePostgres) {
       await pgPool.query(
-        'INSERT INTO users (id, username, email, password, name, role, status) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [user.id, user.username, user.email, user.password, user.name, user.role, user.status]
+        'INSERT INTO users (id, username, email, password, name, role, status, line_user_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        [user.id, user.username, user.email, user.password, user.name, user.role, user.status, user.line_user_id || null]
       );
     } else {
       const data = readDB();
@@ -104,6 +104,17 @@ const db = {
       const data = readDB();
       const u = data.users.find(x => x.id === id);
       if (u) u.role = role;
+      writeDB(data);
+    }
+  },
+
+  linkLineUser: async (id, lineUserId) => {
+    if (usePostgres) {
+      await pgPool.query('UPDATE users SET line_user_id = $1 WHERE id = $2', [lineUserId, id]);
+    } else {
+      const data = readDB();
+      const u = data.users.find(x => x.id === id);
+      if (u) u.line_user_id = lineUserId;
       writeDB(data);
     }
   },
@@ -165,7 +176,7 @@ const db = {
           ...b,
           userName: user ? user.name : 'ไม่ระบุผู้ใช้',
           userEmail: user ? user.email : '',
-          carModel: car ? `${car.model} (${car.color})` : 'ไม่พบข้อมูลรถยนต์',
+          carModel: car ? `${car.model} (${car.color})` : (b.carId ? 'ไม่พบข้อมูลรถยนต์' : null),
           carImage: car ? car.image : ''
         };
       });
@@ -185,12 +196,31 @@ const db = {
     }
   },
 
-  updateBookingStatus: async (id, status, notes, approvedBy) => {
+  updateBookingStatus: async (id, status, notes, approvedBy, carId = undefined, driver = undefined) => {
     if (usePostgres) {
-      await pgPool.query(
-        'UPDATE bookings SET status = $1, notes = $2, approved_by = $3 WHERE id = $4',
-        [status, notes, approvedBy, id]
-      );
+      if (carId !== undefined || driver !== undefined) {
+        if (carId !== undefined && driver !== undefined) {
+          await pgPool.query(
+            'UPDATE bookings SET status = $1, notes = $2, approved_by = $3, car_id = $4, driver = $5 WHERE id = $6',
+            [status, notes, approvedBy, carId, driver, id]
+          );
+        } else if (carId !== undefined) {
+          await pgPool.query(
+            'UPDATE bookings SET status = $1, notes = $2, approved_by = $3, car_id = $4 WHERE id = $5',
+            [status, notes, approvedBy, carId, id]
+          );
+        } else {
+          await pgPool.query(
+            'UPDATE bookings SET status = $1, notes = $2, approved_by = $3, driver = $4 WHERE id = $5',
+            [status, notes, approvedBy, driver, id]
+          );
+        }
+      } else {
+        await pgPool.query(
+          'UPDATE bookings SET status = $1, notes = $2, approved_by = $3 WHERE id = $4',
+          [status, notes, approvedBy, id]
+        );
+      }
     } else {
       const data = readDB();
       const b = data.bookings.find(x => x.id === id);
@@ -198,6 +228,8 @@ const db = {
         b.status = status;
         b.notes = notes;
         b.approvedBy = approvedBy;
+        if (carId !== undefined) b.carId = carId;
+        if (driver !== undefined) b.driver = driver;
       }
       writeDB(data);
     }
@@ -248,6 +280,7 @@ const initPostgresDB = async () => {
         name VARCHAR(100) NOT NULL,
         role VARCHAR(20) NOT NULL,
         status VARCHAR(20) NOT NULL,
+        line_user_id VARCHAR(100) UNIQUE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -285,6 +318,12 @@ const initPostgresDB = async () => {
 
     // Ensure driver column exists on existing PostgreSQL databases
     await client.query("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS driver VARCHAR(100) DEFAULT '';");
+
+    // Ensure line_user_id column exists on existing PostgreSQL databases
+    await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS line_user_id VARCHAR(100) UNIQUE;");
+
+    // Ensure car_id column is nullable on existing PostgreSQL databases
+    await client.query("ALTER TABLE bookings ALTER COLUMN car_id DROP NOT NULL;");
 
     console.log('PostgreSQL Tables verified.');
 
@@ -649,10 +688,32 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
       email: user.email,
       name: user.name,
       role: user.role,
-      status: user.status
+      status: user.status,
+      lineUserId: user.line_user_id || null
     });
   } catch (err) {
     res.status(500).json({ message: err.message || 'ไม่สามารถโหลดข้อมูลสิทธิ์ผู้ใช้ได้' });
+  }
+});
+
+// Link LINE account
+app.post('/api/auth/link-line', authenticateToken, async (req, res) => {
+  const { lineUserId } = req.body;
+  if (!lineUserId || !lineUserId.trim()) {
+    return res.status(400).json({ message: 'กรุณาระบุ LINE User ID' });
+  }
+
+  try {
+    const users = await db.getUsers();
+    const existingUser = users.find(u => u.line_user_id === lineUserId.trim() && u.id !== req.user.id);
+    if (existingUser) {
+      return res.status(400).json({ message: `LINE User ID นี้ถูกใช้ผูกบัญชีกับผู้ใช้อื่นแล้ว (${existingUser.name})` });
+    }
+
+    await db.linkLineUser(req.user.id, lineUserId.trim());
+    res.json({ message: 'เชื่อมโยงบัญชี LINE ของคุณสำเร็จแล้ว!' });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'ไม่สามารถเชื่อมโยงบัญชี LINE ได้' });
   }
 });
 
@@ -699,34 +760,40 @@ app.get('/api/bookings', authenticateToken, async (req, res) => {
 app.post('/api/bookings', authenticateToken, async (req, res) => {
   const { carId, startTime, endTime, purpose, driver } = req.body;
 
-  if (!carId || !startTime || !endTime || !purpose) {
+  if (!startTime || !endTime || !purpose) {
     return res.status(400).json({ message: 'กรุณากรอกข้อมูลการจองให้ครบถ้วน' });
   }
 
   try {
-    const cars = await db.getCars();
-    const car = cars.find(c => c.id === carId);
-
-    if (!car) return res.status(404).json({ message: 'ไม่พบข้อมูลรถยนต์ที่ระบุ' });
-    if (car.status === 'maintenance') {
-      return res.status(400).json({ message: 'ขออภัย รถยนต์คันนี้อยู่ระหว่างการซ่อมบำรุง' });
-    }
-
     const bookings = await db.getBookings();
-    const isOverlapping = checkOverlap(carId, startTime, endTime, bookings);
-    if (isOverlapping) {
-      return res.status(400).json({ message: 'ขออภัย รถยนต์คันนี้มีผู้จองแล้วในช่วงเวลาดังกล่าว กรุณาเลือกเวลาอื่นหรือรถยนต์คันอื่น' });
+    let selectedCar = null;
+
+    if (carId && carId.trim()) {
+      const cars = await db.getCars();
+      selectedCar = cars.find(c => c.id === carId);
+
+      if (!selectedCar) return res.status(404).json({ message: 'ไม่พบข้อมูลรถยนต์ที่ระบุ' });
+      if (selectedCar.status === 'maintenance') {
+        return res.status(400).json({ message: 'ขออภัย รถยนต์คันนี้อยู่ระหว่างการซ่อมบำรุง' });
+      }
+
+      const isOverlapping = checkOverlap(carId, startTime, endTime, bookings);
+      if (isOverlapping) {
+        return res.status(400).json({ message: 'ขออภัย รถยนต์คันนี้มีผู้จองแล้วในช่วงเวลาดังกล่าว กรุณาเลือกเวลาอื่นหรือรถยนต์คันอื่น' });
+      }
     }
 
-    const isDriverOverlapping = checkDriverOverlap(driver, startTime, endTime, bookings);
-    if (isDriverOverlapping) {
-      return res.status(400).json({ message: `ขออภัย พนักงานขับรถ (${driver}) ติดงานอื่นในช่วงเวลาดังกล่าว กรุณาเลือกพนักงานขับรถคนอื่นหรือเปลี่ยนเวลา` });
+    if (driver && driver.trim()) {
+      const isDriverOverlapping = checkDriverOverlap(driver, startTime, endTime, bookings);
+      if (isDriverOverlapping) {
+        return res.status(400).json({ message: `ขออภัย พนักงานขับรถ (${driver}) ติดงานอื่นในช่วงเวลาดังกล่าว กรุณาเลือกพนักงานขับรถคนอื่นหรือเปลี่ยนเวลา` });
+      }
     }
 
     const newBooking = {
       id: 'b_' + Date.now(),
       userId: req.user.id,
-      carId,
+      carId: carId && carId.trim() ? carId : null,
       startTime,
       endTime,
       purpose,
@@ -744,18 +811,19 @@ app.post('/api/bookings', authenticateToken, async (req, res) => {
     // Notify Admins & Schedulers
     const users = await db.getUsers();
     const notifyList = users.filter(u => u.role === 'admin' || u.role === 'scheduler');
+    const carInfoText = selectedCar ? `${selectedCar.model} (${selectedCar.color})` : 'รอการจัดสรรรถยนต์';
     for (const approver of notifyList) {
       await sendNotification(
         'email',
         approver.email,
         'คำขอจองรถยนต์ใหม่รอการอนุมัติ',
-        `ผู้ขอจอง: ${req.user.name}\nรถยนต์: ${car.model} (${car.color})\nวันเวลา: ${formatThaiDateTime(startTime)} - ${formatThaiDateTime(endTime)}\nวัตถุประสงค์: ${purpose}\n\nกรุณาเข้าสู่ระบบเพื่อจัดการอนุมัติคำขอ`
+        `ผู้ขอจอง: ${req.user.name}\nรถยนต์: ${carInfoText}\nวันเวลา: ${formatThaiDateTime(startTime)} - ${formatThaiDateTime(endTime)}\nวัตถุประสงค์: ${purpose}\n\nกรุณาเข้าสู่ระบบเพื่อจัดการอนุมัติคำขอ`
       );
       await sendNotification(
         'line',
         approver.id,
         '🚗 คำขอจองรถยนต์ใหม่ (รออนุมัติ)',
-        `ผู้ขอ: ${req.user.name}\nรถ: ${car.model}\nเวลา: ${formatThaiDateTime(startTime)} ถึง ${formatThaiDateTime(endTime)}\nวัตถุประสงค์: ${purpose}`
+        `ผู้ขอ: ${req.user.name}\nรถ: ${carInfoText}\nเวลา: ${formatThaiDateTime(startTime)} ถึง ${formatThaiDateTime(endTime)}\nวัตถุประสงค์: ${purpose}`
       );
     }
 
@@ -813,7 +881,7 @@ app.post('/api/bookings/:id/cancel', authenticateToken, async (req, res) => {
 // Approve Booking
 app.post('/api/bookings/:id/approve', authenticateToken, requireRole(['admin', 'scheduler']), async (req, res) => {
   const { id } = req.params;
-  const { notes } = req.body;
+  const { notes, carId, driver } = req.body;
 
   try {
     const bookings = await db.getBookings();
@@ -821,22 +889,34 @@ app.post('/api/bookings/:id/approve', authenticateToken, requireRole(['admin', '
 
     if (!booking) return res.status(404).json({ message: 'ไม่พบข้อมูลการจอง' });
 
-    const isOverlapping = checkOverlap(booking.carId, booking.startTime, booking.endTime, bookings, booking.id);
+    // Determine final car and driver
+    const finalCarId = carId !== undefined ? (carId && carId.trim() ? carId : null) : booking.carId;
+    const finalDriver = driver !== undefined ? driver : booking.driver;
+
+    if (!finalCarId) {
+      return res.status(400).json({ message: 'ไม่สามารถอนุมัติได้เนื่องจากยังไม่ได้ระบุรถยนต์ กรุณาเลือกจัดสรรรถยนต์ก่อนกดยืนยันอนุมัติ' });
+    }
+
+    // Check overlap for finalCarId
+    const isOverlapping = checkOverlap(finalCarId, booking.startTime, booking.endTime, bookings, booking.id);
     if (isOverlapping) {
       return res.status(400).json({ message: 'ไม่สามารถอนุมัติได้เนื่องจากมีรายการจองรถยนต์คันนี้ในช่วงเวลาเดียวกันได้รับการอนุมัติแล้ว' });
     }
 
-    const isDriverOverlapping = checkDriverOverlap(booking.driver, booking.startTime, booking.endTime, bookings, booking.id);
-    if (isDriverOverlapping) {
-      return res.status(400).json({ message: `ไม่สามารถอนุมัติได้เนื่องจากพนักงานขับรถ (${booking.driver}) ติดงานอื่นในช่วงเวลาเดียวกัน` });
+    // Check overlap for finalDriver
+    if (finalDriver && finalDriver.trim()) {
+      const isDriverOverlapping = checkDriverOverlap(finalDriver, booking.startTime, booking.endTime, bookings, booking.id);
+      if (isDriverOverlapping) {
+        return res.status(400).json({ message: `ไม่สามารถอนุมัติได้เนื่องจากพนักงานขับรถ (${finalDriver}) ติดงานอื่นในช่วงเวลาเดียวกัน` });
+      }
     }
 
     const noteText = notes || 'ได้รับการอนุมัติ';
-    await db.updateBookingStatus(id, 'approved', noteText, req.user.name);
+    await db.updateBookingStatus(id, 'approved', noteText, req.user.name, finalCarId, finalDriver);
 
     // Notify User
     const cars = await db.getCars();
-    const car = cars.find(c => c.id === booking.carId);
+    const car = cars.find(c => c.id === finalCarId);
     const users = await db.getUsers();
     const targetUser = users.find(u => u.id === booking.userId);
 
@@ -851,7 +931,7 @@ app.post('/api/bookings/:id/approve', authenticateToken, requireRole(['admin', '
         'line',
         targetUser.id,
         '✅ คำขอจองรถยนต์ได้รับการอนุมัติ',
-        `รถ: ${car ? car.model : ''}\nเวลา: ${formatThaiDateTime(booking.startTime)}\nผู้อนุมัติ: ${req.user.name}\nหมายเหตุ: ${noteText}`
+        `รถ: ${car ? car.model : ''}\nเวลา: ${formatThaiDateTime(booking.startTime)}\nคนขับ: ${finalDriver || 'ไม่ระบุ'}\nผู้อนุมัติ: ${req.user.name}\nหมายเหตุ: ${noteText}`
       );
     }
 
@@ -999,6 +1079,235 @@ app.post('/api/admin/reset-system', authenticateToken, requireRole(['admin']), a
 });
 
 
+
+// --- LINE WEBHOOK AND TEXT BOOKING PARSER ---
+
+const sendLINEReply = async (replyToken, messageText) => {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!token) {
+    console.error("LINE_CHANNEL_ACCESS_TOKEN not configured");
+    return;
+  }
+
+  try {
+    const res = await fetch('https://api.line.me/v2/bot/message/reply', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        replyToken,
+        messages: [{ type: 'text', text: messageText }]
+      })
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      console.error(`LINE reply API failed: ${res.status} ${txt}`);
+    }
+  } catch (err) {
+    console.error("Error sending LINE reply:", err);
+  }
+};
+
+const parseLINEBookingText = (text) => {
+  const lineText = text.trim();
+  
+  // 1. Parse Date
+  let dateStr = getBangkokTodayString(); // Default to today
+  const inlineDateRegex = /(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})/;
+  const inlineDateMatch = lineText.match(inlineDateRegex);
+  let cleanedText = lineText;
+  
+  if (inlineDateMatch) {
+    const d = parseInt(inlineDateMatch[1]);
+    const m = parseInt(inlineDateMatch[2]);
+    let y = parseInt(inlineDateMatch[3]);
+    if (y > 2400) y -= 543; // Convert B.E. to A.D.
+    dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    cleanedText = cleanedText.replace(inlineDateMatch[0], '');
+  }
+
+  // 2. Parse Time
+  let startTime = '08:00';
+  let endTime = '10:00';
+  const rangeRegex = /(?:เวลา\s*)?(\d{1,2})[\.:](\d{2})\s*(?:-|ถึง)\s*(\d{1,2})[\.:](\d{2})\s*(?:น\.)?/;
+  const rangeMatch = cleanedText.match(rangeRegex);
+  
+  if (rangeMatch) {
+    startTime = `${String(rangeMatch[1]).padStart(2, '0')}:${rangeMatch[2]}`;
+    endTime = `${String(rangeMatch[3]).padStart(2, '0')}:${rangeMatch[4]}`;
+    cleanedText = cleanedText.replace(rangeMatch[0], '');
+  } else {
+    const singleTimeRegex = /(?:เวลา\s*)?(\d{1,2})[\.:](\d{2})\s*(?:น\.)?/;
+    const singleMatch = cleanedText.match(singleTimeRegex);
+    if (singleMatch) {
+      startTime = `${String(singleMatch[1]).padStart(2, '0')}:${singleMatch[2]}`;
+      let endHour = parseInt(singleMatch[1]) + 2;
+      if (endHour > 23) endHour = 23;
+      endTime = `${String(endHour).padStart(2, '0')}:${singleMatch[2]}`;
+      cleanedText = cleanedText.replace(singleMatch[0], '');
+    }
+  }
+
+  // 3. Match Car
+  let matchedCarId = null;
+  const carsMapping = [
+    { id: 'car1', keywords: ['รถตู้ขาว', 'ตู้ขาว', 'ฮร 8010', '8010'] },
+    { id: 'car2', keywords: ['รถตู้เทา', 'ตู้เทา', 'ฮย 1906', '1906'] },
+    { id: 'car3', keywords: ['ยาริส', 'เก๋งเทา', '6249'] },
+    { id: 'car4', keywords: ['เชฟ', 'เชฟโรเลต', '8709'] },
+    { id: 'car5', keywords: ['อัลพาร์ด', 'alphard', '6276'] }
+  ];
+
+  for (const car of carsMapping) {
+    for (const kw of car.keywords) {
+      if (cleanedText.toLowerCase().includes(kw.toLowerCase())) {
+        matchedCarId = car.id;
+        const kwRegex = new RegExp(kw, 'gi');
+        cleanedText = cleanedText.replace(kwRegex, '');
+        break;
+      }
+    }
+    if (matchedCarId) break;
+  }
+
+  // 4. Match Driver
+  let matchedDriver = '';
+  const driversList = [
+    'นายสุรศักดิ์ ชาแท่น',
+    'นายสุระเชษฐ วิบูลพันธุ์',
+    'นายวิไล พลรักษา',
+    'นายเฉลิมพล ชมเชย'
+  ];
+
+  for (const drv of driversList) {
+    const firstName = drv.split(' ')[0];
+    if (cleanedText.includes(drv) || cleanedText.includes(firstName)) {
+      matchedDriver = drv;
+      cleanedText = cleanedText.replace(drv, '').replace(firstName, '');
+      break;
+    }
+  }
+
+  // 5. Purpose
+  let purpose = cleanedText
+    .replace(/\s+/g, ' ')
+    .replace(/^[,.\s\-:|]+|[,.\s\-:|]+$/g, '')
+    .trim();
+
+  if (!purpose) purpose = 'จองรถผ่าน LINE';
+
+  return {
+    carId: matchedCarId,
+    startTime: `${dateStr}T${startTime}`,
+    endTime: `${dateStr}T${endTime}`,
+    purpose,
+    driver: matchedDriver
+  };
+};
+
+app.post('/api/line/webhook', async (req, res) => {
+  const { events } = req.body;
+  if (!events || events.length === 0) {
+    return res.sendStatus(200);
+  }
+
+  const event = events[0];
+  if (event.type !== 'message' || event.message.type !== 'text') {
+    return res.sendStatus(200);
+  }
+
+  const replyToken = event.replyToken;
+  const lineText = event.message.text.trim();
+  const lineUserId = event.source.userId;
+
+  // Simple "id" trigger
+  if (lineText.toLowerCase() === 'id') {
+    await sendLINEReply(replyToken, `LINE User ID ของคุณคือ:\n${lineUserId}`);
+    return res.sendStatus(200);
+  }
+
+  try {
+    const users = await db.getUsers();
+    const user = users.find(u => u.line_user_id === lineUserId);
+
+    if (!user) {
+      const replyMsg = `⚠️ **ยังไม่ได้ผูกบัญชี LINE กับระบบจองรถ**\n\nรหัส LINE User ID ของคุณคือ:\n${lineUserId}\n\n👉 **วิธีเปิดสิทธิ์จอง:**\nกรุณาคัดลอกรหัสนี้ไปใส่ในหน้าเว็บแอป (ปุ่ม "🔗 ผูกบัญชี LINE" ด้านขวาบน) เพื่อยืนยันตัวตนก่อนจองค่ะ`;
+      await sendLINEReply(replyToken, replyMsg);
+      return res.sendStatus(200);
+    }
+
+    const cars = await db.getCars();
+    const parsed = parseLINEBookingText(lineText);
+
+    // Verify times
+    const start = new Date(parsed.startTime);
+    const end = new Date(parsed.endTime);
+    if (start >= end) {
+      await sendLINEReply(replyToken, `❌ จองรถไม่สำเร็จ: เวลาเริ่มต้นเดินทางต้องอยู่ก่อนเวลาสิ้นสุดเดินทางค่ะ`);
+      return res.sendStatus(200);
+    }
+
+    // Overlap checks (only run if car/driver specified)
+    const bookings = await db.getBookings();
+    if (parsed.carId) {
+      const isOverlapping = checkOverlap(parsed.carId, parsed.startTime, parsed.endTime, bookings);
+      if (isOverlapping) {
+        const car = cars.find(c => c.id === parsed.carId);
+        await sendLINEReply(replyToken, `❌ จองรถไม่สำเร็จ: ขออภัย รถยนต์ (${car ? car.model : ''}) มีผู้จองแล้วในช่วงเวลาดังกล่าว กรุณาเลือกเวลาอื่นหรือเปลี่ยนคันค่ะ`);
+        return res.sendStatus(200);
+      }
+    }
+
+    if (parsed.driver) {
+      const isDriverOverlapping = checkDriverOverlap(parsed.driver, parsed.startTime, parsed.endTime, bookings);
+      if (isDriverOverlapping) {
+        await sendLINEReply(replyToken, `❌ จองรถไม่สำเร็จ: ขออภัย คนขับ (${parsed.driver}) ติดงานอื่นในช่วงเวลาดังกล่าว กรุณาเลือกเวลาอื่นหรือเปลี่ยนคนขับค่ะ`);
+        return res.sendStatus(200);
+      }
+    }
+
+    const newBooking = {
+      id: 'b_' + Date.now(),
+      userId: user.id,
+      carId: parsed.carId,
+      startTime: parsed.startTime,
+      endTime: parsed.endTime,
+      purpose: parsed.purpose,
+      destination: '',
+      passengers: 1,
+      status: 'pending',
+      notes: '',
+      approvedBy: '',
+      driver: parsed.driver,
+      createdAt: new Date().toISOString()
+    };
+
+    await db.saveBooking(newBooking);
+
+    // Format reply message
+    const formattedDate = formatThaiDate(parsed.startTime.split('T')[0]);
+    const startHour = parsed.startTime.split('T')[1];
+    const endHour = parsed.endTime.split('T')[1];
+    const car = parsed.carId ? cars.find(c => c.id === parsed.carId) : null;
+    
+    let confirmMsg = `✅ ส่งคำขอจองรถยนต์สำเร็จแล้ว! (รออนุมัติ)\n`;
+    confirmMsg += `👤 ผู้จอง: ${user.name}\n`;
+    confirmMsg += `📅 วันเดินทาง: ${formattedDate}\n`;
+    confirmMsg += `⏰ เวลา: ${startHour} - ${endHour} น.\n`;
+    confirmMsg += `🚗 รถยนต์: ${car ? car.model : '⏳ รอเจ้าหน้าที่จัดสรรรถยนต์'}\n`;
+    confirmMsg += `👤 คนขับ: ${parsed.driver || '⏳ รอเจ้าหน้าที่จัดสรรคนขับ'}\n`;
+    confirmMsg += `📝 วัตถุประสงค์: ${parsed.purpose}`;
+
+    await sendLINEReply(replyToken, confirmMsg);
+  } catch (err) {
+    console.error("Webhook processing error:", err);
+    await sendLINEReply(replyToken, `❌ เกิดข้อผิดพลาดของระบบ: ไม่สามารถบันทึกการจองได้ในขณะนี้`);
+  }
+
+  res.sendStatus(200);
+});
 
 // Expose public API route for manual or external cron triggers
 app.get('/api/cron/daily-send', async (req, res) => {
