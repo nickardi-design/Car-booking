@@ -111,7 +111,13 @@ const db = {
   getLineLinks: async (userId) => {
     if (usePostgres) {
       const res = await pgPool.query('SELECT * FROM user_line_links WHERE user_id = $1', [userId]);
-      return res.rows;
+      return res.rows.map(row => ({
+        id: row.id,
+        userId: row.user_id,
+        lineUserId: row.line_user_id,
+        lineDisplayName: row.line_display_name,
+        createdAt: row.created_at
+      }));
     } else {
       const data = readDB();
       return (data.userLineLinks || []).filter(l => l.userId === userId);

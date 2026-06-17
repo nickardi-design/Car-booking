@@ -1186,9 +1186,9 @@ export default function App() {
                       >
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                           <strong style={{ fontSize: '0.95rem', color: '#06C755', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span style={{ fontSize: '0.6rem' }}>🟢</span> {link.lineDisplayName || 'ผู้ใช้ LINE'}
+                            <span style={{ fontSize: '0.6rem' }}>🟢</span> {link.lineDisplayName || link.line_display_name || 'ผู้ใช้ LINE'}
                           </strong>
-                          <code style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ID: {link.lineUserId.substring(0, 15)}...</code>
+                          <code style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ID: {(link.lineUserId || link.line_user_id || '').substring(0, 15)}...</code>
                         </div>
                         <button 
                           className="btn btn-secondary" 
