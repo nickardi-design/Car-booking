@@ -803,18 +803,14 @@ export default function App() {
                               {getCarIcon(carType)}
                             </span>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              <div style={{ fontWeight: '700', fontSize: '1rem', color: 'var(--text-main)' }}>
-                                {b.carModel || 'ไม่พบข้อมูลรถยนต์'}
+                              <div style={{ fontWeight: '700', fontSize: '1rem', color: 'var(--text-main)', lineHeight: '1.4' }}>
+                                {b.driver || 'ไม่ระบุคนขับ'} {b.carModel || 'ไม่พบข้อมูลรถยนต์'} {b.purpose}
                               </div>
                               <div style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: '600' }}>
                                 📅 {formatThaiDateTime(b.startTime)} - {b.endTime.split('T')[1]?.substring(0, 5) || ''} น.
                               </div>
-                              <div style={{ fontSize: '0.85rem', color: 'var(--text-main)' }}>
-                                📝 วัตถุประสงค์: <span style={{ color: 'var(--text-muted)' }}>{b.purpose}</span>
-                              </div>
-                              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '4px', fontSize: '0.8rem' }}>
-                                {b.driver && <span style={{ color: 'var(--info)' }}>👤 คนขับ: {b.driver}</span>}
-                                <span style={{ color: 'var(--text-muted)' }}>👤 ผู้จอง: {b.userName || 'ไม่ระบุผู้ใช้'}</span>
+                              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                <span>👤 ผู้ขอจอง: {b.userName || 'ไม่ระบุผู้ใช้'}</span>
                               </div>
                             </div>
                           </div>
