@@ -776,7 +776,7 @@ export default function App() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '450px', overflowY: 'auto', paddingRight: '6px' }}>
                   {[...bookings]
                     .filter(b => b.status === 'approved' || b.status === 'pending') // กรองเฉพาะรายการที่ใช้งานจริง (อนุมัติแล้ว หรือ รออนุมัติ)
-                    .sort((a, b) => b.startTime.localeCompare(a.startTime)) // จัดเรียงแบบตัวอักษรเพื่อหลีกเลี่ยงปัญหา Date parsing บนเบราว์เซอร์
+                    .sort((a, b) => (b.startTime || '').localeCompare(a.startTime || '')) // จัดเรียงแบบตัวอักษรเพื่อหลีกเลี่ยงปัญหา Date parsing บนเบราว์เซอร์ และป้องกันการแครชถ้าไม่มีฟิลด์ startTime
                     .map(b => {
                       const car = cars.find(c => c.id === b.carId);
                       const carType = car ? car.type : 'van';
