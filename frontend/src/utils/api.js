@@ -217,7 +217,19 @@ export const generateICSFileLink = (booking) => {
   const end = formatTimeICS(booking.endTime);
   const now = formatTimeICS(new Date().toISOString());
   
-  const title = `🚗 จองรถ: ${booking.carModel} | คนขับ: ${booking.driver || 'ไม่ระบุ'} | วัตถุประสงค์: ${booking.purpose}`;
+  const getIcon = (carModel, carImage) => {
+    const model = (carModel || '').toLowerCase();
+    const img = (carImage || '').toLowerCase();
+    if (model.includes('ตู้') || img.includes('van') || img.includes('alphard')) return '🚐';
+    if (model.includes('ยาริส') || img.includes('yaris') || img.includes('sedan')) return '🚗';
+    if (model.includes('เชฟ') || img.includes('chev') || img.includes('suv')) return '🚙';
+    return '🚐';
+  };
+  const icon = getIcon(booking.carModel, booking.carImage);
+  const driverName = booking.driver || 'ไม่ระบุคนขับ';
+  const modelName = booking.carModel || 'ไม่ระบุรถยนต์';
+  const purposeText = booking.purpose || '';
+  const title = `${icon} ${driverName} ${modelName} ${purposeText}`.trim();
   const details = `วัตถุประสงค์: ${booking.purpose}\\nผู้จอง: ${booking.userName}\\nผู้อนุมัติ: ${booking.approvedBy || 'ไม่ระบุ'}\\nคนขับ: ${booking.driver || 'ไม่ระบุ'}`;
 
   const icsLines = [
