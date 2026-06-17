@@ -715,10 +715,6 @@ export default function App() {
 
       {/* App Header */}
       <header className="app-header">
-        <div className="logo-section">
-          🚐 คลังยานพาหนะจองออนไลน์
-        </div>
-
         <nav className="nav-links">
           <div className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
             🏠 แผงจองรถ
