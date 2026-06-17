@@ -47,13 +47,23 @@ export const setStoredUser = (user) => {
 // Base Fetch Wrapper
 const request = async (endpoint, options = {}) => {
   const token = getToken();
+  
+  // Cache busting for GET requests to prevent aggressive browser caching (especially on Safari/mobile)
+  let url = `${API_URL}${endpoint}`;
+  if (options.method === 'GET' || !options.method) {
+    const separator = url.includes('?') ? '&' : '?';
+    url = `${url}${separator}_t=${Date.now()}`;
+  }
+
   const headers = {
     'Content-Type': 'application/json',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
     ...(token && { 'Authorization': `Bearer ${token}` }),
     ...options.headers,
   };
 
-  const response = await fetch(`${API_URL}${endpoint}`, {
+  const response = await fetch(url, {
     ...options,
     headers,
   });
