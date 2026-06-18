@@ -610,7 +610,9 @@ const formatThaiDateTime = (dateString) => {
 
 // Create Gmail SMTP transporter (uses env vars GMAIL_USER + GMAIL_APP_PASSWORD)
 const ipv4Lookup = (hostname, options, callback) => {
-  return dns.lookup(hostname, { family: 4 }, callback);
+  const cb = typeof options === 'function' ? options : callback;
+  const opts = typeof options === 'object' ? options : {};
+  return dns.lookup(hostname, { ...opts, family: 4 }, cb);
 };
 
 const createMailTransporter = () => {
