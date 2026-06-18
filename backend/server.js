@@ -7,6 +7,78 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import pkg from 'pg';
 import cron from 'node-cron';
+import crypto from 'crypto';
+
+// --- NATIVE TOTP / 2FA HELPERS ---
+
+function base32Decode(base32) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const clean = base32.replace(/=+$/, '').toUpperCase().replace(/\s/g, '');
+  let bits = '';
+  
+  for (let i = 0; i < clean.length; i++) {
+    const val = alphabet.indexOf(clean[i]);
+    if (val === -1) throw new Error('Invalid base32 character');
+    bits += val.toString(2).padStart(5, '0');
+  }
+
+  const bytes = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) {
+    bytes.push(parseInt(bits.substring(i, i + 8), 2));
+  }
+  return Buffer.from(bytes);
+}
+
+function verifyTOTP(token, secret, timeWindow = 1) {
+  const cleanToken = (token || '').trim();
+  if (cleanToken.length !== 6 || !/^\d+$/.test(cleanToken)) return false;
+
+  try {
+    const key = base32Decode(secret);
+    const epoch = Math.floor(Date.now() / 1000);
+    const timeStep = 30;
+    const currentCounter = Math.floor(epoch / timeStep);
+
+    for (let i = -timeWindow; i <= timeWindow; i++) {
+      const counter = currentCounter + i;
+      const buf = Buffer.alloc(8);
+      buf.writeUInt32BE(0, 0);
+      buf.writeUInt32BE(counter, 4);
+
+      const hmac = crypto.createHmac('sha1', key);
+      hmac.update(buf);
+      const hmacResult = hmac.digest();
+
+      const offset = hmacResult[hmacResult.length - 1] & 0xf;
+      const binary = ((hmacResult[offset] & 0x7f) << 24) |
+                     ((hmacResult[offset + 1] & 0xff) << 16) |
+                     ((hmacResult[offset + 2] & 0xff) << 8) |
+                     (hmacResult[offset + 3] & 0xff);
+
+      const otp = binary % 1000000;
+      const expected = String(otp).padStart(6, '0');
+
+      if (expected === cleanToken) {
+        return true;
+      }
+    }
+  } catch (err) {
+    console.error('TOTP verification error:', err);
+    return false;
+  }
+  return false;
+}
+
+function generateSecret(length = 16) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const randomBytes = crypto.randomBytes(length);
+  let secret = '';
+  for (let i = 0; i < length; i++) {
+    secret += alphabet[randomBytes[i] % alphabet.length];
+  }
+  return secret;
+}
+
 
 const { Pool } = pkg;
 
@@ -288,6 +360,7 @@ const db = {
         await client.query('TRUNCATE TABLE bookings CASCADE');
         await client.query('TRUNCATE TABLE user_line_links CASCADE');
         await client.query("DELETE FROM users WHERE username NOT IN ('admin', 'scheduler', 'user')");
+        await client.query("UPDATE users SET two_factor_secret = NULL, two_factor_enabled = FALSE");
         await client.query("UPDATE cars SET status = 'available'");
         await client.query('COMMIT');
       } catch (err) {
@@ -304,6 +377,27 @@ const db = {
       data.cars.forEach(c => {
         c.status = 'available';
       });
+      data.users.forEach(u => {
+        u.twoFactorSecret = null;
+        u.twoFactorEnabled = false;
+      });
+      writeDB(data);
+    }
+  },
+
+  updateUser2FA: async (id, secret, enabled) => {
+    if (usePostgres) {
+      await pgPool.query(
+        'UPDATE users SET two_factor_secret = $1, two_factor_enabled = $2 WHERE id = $3',
+        [secret, enabled, id]
+      );
+    } else {
+      const data = readDB();
+      const u = data.users.find(x => x.id === id);
+      if (u) {
+        u.twoFactorSecret = secret;
+        u.twoFactorEnabled = enabled;
+      }
       writeDB(data);
     }
   }
@@ -382,6 +476,10 @@ const initPostgresDB = async () => {
 
     // Ensure car_id column is nullable on existing PostgreSQL databases
     await client.query("ALTER TABLE bookings ALTER COLUMN car_id DROP NOT NULL;");
+
+    // Ensure two_factor_secret and two_factor_enabled columns exist on users
+    await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_secret VARCHAR(255) DEFAULT NULL;");
+    await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN DEFAULT FALSE;");
 
     console.log('PostgreSQL Tables verified.');
 
@@ -712,6 +810,15 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(403).json({ message: 'บัญชีของคุณถูกระงับการใช้งานชั่วคราว' });
     }
 
+    // Check if 2FA is enabled
+    const twoFactorEnabled = user.two_factor_enabled || user.twoFactorEnabled || false;
+    if (twoFactorEnabled) {
+      return res.json({
+        require2FA: true,
+        userId: user.id
+      });
+    }
+
     const token = jwt.sign(
       { id: user.id, username: user.username, email: user.email, name: user.name, role: user.role },
       JWT_SECRET,
@@ -725,7 +832,8 @@ app.post('/api/auth/login', async (req, res) => {
         username: user.username,
         email: user.email,
         name: user.name,
-        role: user.role
+        role: user.role,
+        twoFactorEnabled: false
       }
     });
   } catch (err) {
@@ -749,10 +857,133 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
       name: user.name,
       role: user.role,
       status: user.status,
-      lineLinks
+      lineLinks,
+      twoFactorEnabled: user.two_factor_enabled || user.twoFactorEnabled || false
     });
   } catch (err) {
     res.status(500).json({ message: err.message || 'ไม่สามารถโหลดข้อมูลสิทธิ์ผู้ใช้ได้' });
+  }
+});
+
+// Setup 2FA - Generate secret
+app.post('/api/auth/2fa/setup', authenticateToken, async (req, res) => {
+  try {
+    const users = await db.getUsers();
+    const user = users.find(u => u.id === req.user.id);
+    if (!user) return res.status(404).json({ message: 'ไม่พบข้อมูลผู้ใช้' });
+
+    // Generate random secret
+    const secret = generateSecret();
+    
+    // Save temporary secret to user (not yet enabled)
+    await db.updateUser2FA(user.id, secret, false);
+
+    // Format OTP Auth URL
+    const label = `CarBooking:${user.username}`;
+    const otpauthUrl = `otpauth://totp/${encodeURIComponent(label)}?secret=${secret}&issuer=CarBooking`;
+
+    res.json({
+      secret,
+      otpauthUrl
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการสร้างคีย์ 2FA' });
+  }
+});
+
+// Verify 2FA Setup
+app.post('/api/auth/2fa/verify-setup', authenticateToken, async (req, res) => {
+  const { code } = req.body;
+  if (!code) return res.status(400).json({ message: 'กรุณากรอกรหัส OTP ยืนยัน' });
+
+  try {
+    const users = await db.getUsers();
+    const user = users.find(u => u.id === req.user.id);
+    if (!user) return res.status(404).json({ message: 'ไม่พบข้อมูลผู้ใช้' });
+
+    const secret = user.two_factor_secret || user.twoFactorSecret;
+    if (!secret) return res.status(400).json({ message: 'ยังไม่ได้ทำการตั้งค่า 2FA ขั้นแรก' });
+
+    const isValid = verifyTOTP(code, secret);
+    if (!isValid) {
+      return res.status(400).json({ message: 'รหัสยืนยันไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง' });
+    }
+
+    // Enable 2FA
+    await db.updateUser2FA(user.id, secret, true);
+
+    res.json({
+      message: 'เปิดใช้งานการยืนยันตัวตนแบบสองขั้นตอน (2FA) สำเร็จ!'
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการเปิดใช้ 2FA' });
+  }
+});
+
+// Disable 2FA
+app.post('/api/auth/2fa/disable', authenticateToken, async (req, res) => {
+  try {
+    const users = await db.getUsers();
+    const user = users.find(u => u.id === req.user.id);
+    if (!user) return res.status(404).json({ message: 'ไม่พบข้อมูลผู้ใช้' });
+
+    // Clear secret and disable
+    await db.updateUser2FA(user.id, null, false);
+
+    res.json({
+      message: 'ปิดใช้งานการยืนยันตัวตนแบบสองขั้นตอน (2FA) เรียบร้อยแล้ว'
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการปิดใช้งาน 2FA' });
+  }
+});
+
+// Verify 2FA Login and issue JWT
+app.post('/api/auth/login/2fa', async (req, res) => {
+  const { userId, code } = req.body;
+  if (!userId || !code) {
+    return res.status(400).json({ message: 'กรุณากรอกรหัสยืนยันตัวตน' });
+  }
+
+  try {
+    const users = await db.getUsers();
+    const user = users.find(u => u.id === userId);
+
+    if (!user) {
+      return res.status(404).json({ message: 'ไม่พบข้อมูลผู้ใช้งาน' });
+    }
+
+    const secret = user.two_factor_secret || user.twoFactorSecret;
+    const isEnabled = user.two_factor_enabled || user.twoFactorEnabled || false;
+
+    if (!secret || !isEnabled) {
+      return res.status(400).json({ message: 'บัญชีนี้ไม่ได้เปิดใช้งาน 2FA' });
+    }
+
+    const isValid = verifyTOTP(code, secret);
+    if (!isValid) {
+      return res.status(400).json({ message: 'รหัสยืนยันไม่ถูกต้อง' });
+    }
+
+    const token = jwt.sign(
+      { id: user.id, username: user.username, email: user.email, name: user.name, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        twoFactorEnabled: true
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'เกิดข้อผิดพลาดในการยืนยันตัวตนล็อกอิน' });
   }
 });
 

@@ -9,6 +9,9 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('booking_token') || '');
   const [authView, setAuthView] = useState('login'); // 'login' | 'register'
+  const [loginStep, setLoginStep] = useState('credentials'); // 'credentials' | '2fa'
+  const [twoFactorLoginUserId, setTwoFactorLoginUserId] = useState('');
+  const [twoFactorCode, setTwoFactorCode] = useState('');
   
   // Auth Form States
   const [username, setUsername] = useState('');
@@ -16,8 +19,14 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   
+  // 2FA Setup States
+  const [twoFactorSetupActive, setTwoFactorSetupActive] = useState(false);
+  const [twoFactorQrUrl, setTwoFactorQrUrl] = useState('');
+  const [twoFactorSecretText, setTwoFactorSecretText] = useState('');
+  const [twoFactorVerifyCode, setTwoFactorVerifyCode] = useState('');
+  
   // Navigation
-  const [activeTab, setActiveTab] = useState(localStorage.getItem('active_tab') || 'dashboard'); // 'dashboard' | 'my-bookings' | 'admin' | 'line-management'
+  const [activeTab, setActiveTab] = useState(localStorage.getItem('active_tab') || 'dashboard'); // 'dashboard' | 'my-bookings' | 'admin' | 'line-management' | 'security'
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     localStorage.setItem('active_tab', tab);
@@ -213,14 +222,94 @@ export default function App() {
     setErrorMsg('');
     try {
       const res = await api.login(username, password);
+      if (res.require2FA) {
+        setTwoFactorLoginUserId(res.userId);
+        setLoginStep('2fa');
+        setTwoFactorCode('');
+        addToast('กรุณากรอกรหัส OTP 2FA จากแอป Authenticator ของคุณ', 'info');
+      } else {
+        setToken(res.token);
+        setUser(res.user);
+        addToast(`ยินดีต้อนรับคุณ ${res.user.name}`, 'success');
+        // Reset form
+        setUsername('');
+        setPassword('');
+      }
+    } catch (err) {
+      setErrorMsg(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handle2FALogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setErrorMsg('');
+    try {
+      const res = await api.verify2FALogin(twoFactorLoginUserId, twoFactorCode);
       setToken(res.token);
       setUser(res.user);
       addToast(`ยินดีต้อนรับคุณ ${res.user.name}`, 'success');
-      // Reset form
+      // Reset state
+      setLoginStep('credentials');
+      setTwoFactorLoginUserId('');
+      setTwoFactorCode('');
       setUsername('');
       setPassword('');
     } catch (err) {
-      setErrorMsg(err.message);
+      setErrorMsg(err.message || 'รหัสยืนยันตัวตน 2FA ไม่ถูกต้อง');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleStart2FASetup = async () => {
+    setLoading(true);
+    try {
+      const res = await api.setup2FA();
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(res.otpauthUrl)}`;
+      setTwoFactorQrUrl(qrUrl);
+      setTwoFactorSecretText(res.secret);
+      setTwoFactorSetupActive(true);
+      setTwoFactorVerifyCode('');
+      addToast('กรุณาสแกน QR Code เพื่อเชื่อมต่อแอป Authenticator', 'info');
+    } catch (err) {
+      addToast(err.message || 'ไม่สามารถเริ่มต้นตั้งค่า 2FA ได้', 'danger');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerify2FASetup = async (e) => {
+    e.preventDefault();
+    if (!twoFactorVerifyCode.trim()) {
+      addToast('กรุณากรอกรหัสยืนยัน 6 หลัก', 'danger');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await api.verify2FASetup(twoFactorVerifyCode.trim());
+      addToast(res.message || 'เปิดใช้งานการยืนยันตัวตนแบบสองขั้นตอนสำเร็จ!', 'success');
+      setTwoFactorSetupActive(false);
+      setTwoFactorVerifyCode('');
+      await fetchUserData(); // Refresh profile
+    } catch (err) {
+      addToast(err.message || 'รหัสยืนยัน 2FA ไม่ถูกต้อง', 'danger');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDisable2FA = async () => {
+    if (!window.confirm('คุณต้องการปิดใช้งานการยืนยันตัวตนแบบสองขั้นตอน (2FA) ใช่หรือไม่? ความปลอดภัยของบัญชีจะลดลง')) return;
+    setLoading(true);
+    try {
+      const res = await api.disable2FA();
+      addToast(res.message || 'ปิดใช้งานการยืนยันตัวตนแบบสองขั้นตอนสำเร็จ', 'success');
+      await fetchUserData(); // Refresh profile
+    } catch (err) {
+      addToast(err.message || 'ไม่สามารถปิดการใช้งาน 2FA ได้', 'danger');
     } finally {
       setLoading(false);
     }
@@ -626,7 +715,42 @@ export default function App() {
             🚐 ระบบจองรถยนต์ส่วนกลาง
           </div>
 
-          {authView === 'login' ? (
+          {loginStep === '2fa' ? (
+            <form onSubmit={handle2FALogin}>
+              <div className="auth-header-title">
+                <h2>🔒 ยืนยันรหัส 2FA</h2>
+                <p>โปรดเปิดแอป Authenticator ของคุณและกรอกรหัสยืนยัน 6 หลัก</p>
+              </div>
+
+              {errorMsg && <div style={{ color: 'var(--danger)', marginBottom: '15px', textAlign: 'center', fontWeight: '500' }}>{errorMsg}</div>}
+
+              <div className="form-group">
+                <label>รหัสยืนยันตัวตน (6 หลัก)</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength="6"
+                  className="input-field"
+                  placeholder="เช่น 123456"
+                  value={twoFactorCode}
+                  onChange={(e) => setTwoFactorCode(e.target.value)}
+                  required
+                  style={{ textAlign: 'center', letterSpacing: '4px', fontSize: '1.25rem', fontWeight: '700' }}
+                />
+              </div>
+
+              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '10px' }} disabled={loading}>
+                {loading ? 'กำลังยืนยัน...' : 'ยืนยันและเข้าสู่ระบบ'}
+              </button>
+
+              <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                <span onClick={() => { setLoginStep('credentials'); setErrorMsg(''); }} style={{ color: 'var(--primary)', cursor: 'pointer', fontWeight: '600' }}>
+                  🔙 ย้อนกลับไปหน้าลงชื่อเข้าใช้ปกติ
+                </span>
+              </div>
+            </form>
+          ) : authView === 'login' ? (
             <form onSubmit={handleLogin}>
               <div className="auth-header-title">
                 <h2>ลงชื่อเข้าใช้งาน</h2>
@@ -774,8 +898,13 @@ export default function App() {
           <div className={`nav-item ${activeTab === 'my-bookings' ? 'active' : ''}`} onClick={() => handleTabChange('my-bookings')}>
             📅 การจองของฉัน
           </div>
-          <div className={`nav-item ${activeTab === 'line-management' ? 'active' : ''}`} onClick={() => handleTabChange('line-management')}>
-            💬 จัดการ LINE {user?.lineLinks?.length > 0 ? `(${user.lineLinks.length})` : ''}
+          {user?.role === 'admin' && (
+            <div className={`nav-item ${activeTab === 'line-management' ? 'active' : ''}`} onClick={() => handleTabChange('line-management')}>
+              💬 จัดการ LINE {user?.lineLinks?.length > 0 ? `(${user.lineLinks.length})` : ''}
+            </div>
+          )}
+          <div className={`nav-item ${activeTab === 'security' ? 'active' : ''}`} onClick={() => handleTabChange('security')}>
+            🔒 ความปลอดภัย (2FA)
           </div>
           {(user?.role === 'admin' || user?.role === 'scheduler') && (
             <div className={`nav-item ${activeTab === 'admin' ? 'active' : ''}`} onClick={() => handleTabChange('admin')}>
@@ -794,25 +923,27 @@ export default function App() {
             <span className={`badge badge-${user?.role}`} style={{ fontSize: '0.65rem', padding: '2px 6px' }}>{user?.role}</span>
           </div>
 
-          <button 
-            className="btn" 
-            onClick={() => handleTabChange('line-management')}
-            style={{ 
-              padding: '8px 12px', 
-              fontSize: '0.8rem', 
-              background: activeTab === 'line-management' ? '#04a747' : '#06C755', 
-              color: '#ffffff', 
-              border: 'none',
-              borderRadius: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontWeight: '600',
-              cursor: 'pointer'
-            }}
-          >
-            💬 จัดการ LINE {user?.lineLinks?.length > 0 ? `(${user.lineLinks.length})` : ''}
-          </button>
+          {user?.role === 'admin' && (
+            <button 
+              className="btn" 
+              onClick={() => handleTabChange('line-management')}
+              style={{ 
+                padding: '8px 12px', 
+                fontSize: '0.8rem', 
+                background: activeTab === 'line-management' ? '#04a747' : '#06C755', 
+                color: '#ffffff', 
+                border: 'none',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontWeight: '600',
+                cursor: 'pointer'
+              }}
+            >
+              💬 จัดการ LINE {user?.lineLinks?.length > 0 ? `(${user.lineLinks.length})` : ''}
+            </button>
+          )}
 
           <button className="btn btn-secondary" onClick={handleLogout} style={{ padding: '8px 14px' }}>
             🚪 ออก
@@ -1146,7 +1277,7 @@ export default function App() {
         )}
 
         {/* 4. LINE LINK MANAGEMENT VIEW */}
-        {activeTab === 'line-management' && !loading && (
+        {activeTab === 'line-management' && !loading && user?.role === 'admin' && (
           <div style={{ padding: '24px 5%', maxWidth: '600px', margin: '0 auto' }}>
             <div className="glass-panel" style={{ padding: '24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
@@ -1242,6 +1373,140 @@ export default function App() {
                   </ol>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* 5. TWO-FACTOR AUTHENTICATION SECURITY VIEW */}
+        {activeTab === 'security' && (
+          <div style={{ padding: '24px 5%', maxWidth: '600px', margin: '0 auto' }}>
+            <div className="glass-panel" style={{ padding: '24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: '700', margin: '0' }}>🔒 ความปลอดภัยและการยืนยันตัวตน</h3>
+                <span className={`badge ${user?.twoFactorEnabled ? 'badge-approved' : 'badge-pending'}`} style={{ fontSize: '0.8rem', padding: '4px 10px' }}>
+                  {user?.twoFactorEnabled ? '🟢 เปิดใช้งานแล้ว' : '⚪ ยังไม่ได้เปิดใช้'}
+                </span>
+              </div>
+
+              {user?.twoFactorEnabled ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', alignItems: 'center', textAlign: 'center', padding: '20px 0' }}>
+                  <span style={{ fontSize: '4rem', filter: 'drop-shadow(0 0 10px rgba(74, 222, 128, 0.4))' }}>🛡️</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <h4 style={{ fontWeight: '700', fontSize: '1.2rem', color: 'var(--success)' }}>บัญชีของคุณเปิดใช้งาน 2FA แล้ว</h4>
+                    <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: '1.6', maxWidth: '400px' }}>
+                      บัญชีของคุณได้รับการป้องกันขั้นสูง เมื่อเข้าสู่ระบบระบบจะร้องขอรหัส OTP 6 หลักที่สร้างจากแอปพลิเคชัน Authenticator ของคุณเพื่อความปลอดภัยสูงสุด
+                    </p>
+                  </div>
+                  
+                  <button 
+                    className="btn btn-secondary" 
+                    onClick={handleDisable2FA}
+                    style={{ 
+                      padding: '10px 20px', 
+                      fontSize: '0.9rem', 
+                      color: 'var(--danger)', 
+                      borderColor: 'var(--danger-glow)',
+                      marginTop: '10px',
+                      background: 'rgba(239, 68, 68, 0.05)'
+                    }}
+                  >
+                    🚫 ปิดใช้งานระบบยืนยันตัวตน (2FA)
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  {!twoFactorSetupActive ? (
+                    <div style={{ textAlign: 'center', padding: '20px 0' }}>
+                      <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '24px', lineHeight: '1.6' }}>
+                        การยืนยันตัวตนสองขั้นตอน (2FA) จะช่วยเพิ่มความปลอดภัยให้กับบัญชีของคุณ โดยการล็อกอินจะต้องการรหัส OTP 6 หลักจากแอปพลิเคชัน Authenticator (เช่น Google Authenticator) นอกเหนือจากการพิมพ์รหัสผ่านหลัก
+                      </p>
+                      <button 
+                        className="btn btn-primary" 
+                        onClick={handleStart2FASetup}
+                        style={{ padding: '12px 28px', fontWeight: '600', fontSize: '0.95rem' }}
+                      >
+                        🚀 เริ่มเปิดใช้งาน 2FA คีย์ลับ
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <h4 style={{ fontWeight: '600', fontSize: '1.1rem', marginBottom: '16px', color: 'var(--primary)' }}>
+                        ⚙️ ขั้นตอนการเชื่อมโยงแอป Authenticator
+                      </h4>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                        
+                        {/* Step 1 */}
+                        <div style={{ background: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+                          <strong style={{ display: 'block', marginBottom: '8px', color: 'var(--text-main)' }}>
+                            1. สแกน QR Code หรือป้อนคีย์ลับด้วยตนเอง
+                          </strong>
+                          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '16px', lineHeight: '1.5' }}>
+                            เปิดแอป Authenticator ของคุณ (Google Authenticator, Microsoft Authenticator ฯลฯ) แล้วกดสแกน QR Code ด้านล่างนี้ หรือคัดลอกคีย์ลับไปป้อนด้วยตนเอง
+                          </p>
+                          
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', margin: '12px 0' }}>
+                            {twoFactorQrUrl && (
+                              <div style={{ background: '#ffffff', padding: '12px', borderRadius: '10px', display: 'inline-block' }}>
+                                <img src={twoFactorQrUrl} alt="2FA QR Code" style={{ display: 'block', width: '200px', height: '200px' }} />
+                              </div>
+                            )}
+                            <div style={{ width: '100%', textAlign: 'center' }}>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>คีย์ลับเพื่อพิมพ์เชื่อมต่อด้วยมือ (Manual Entry Key):</span>
+                              <code style={{ fontSize: '1.1rem', letterSpacing: '2px', color: 'var(--primary)', fontWeight: '700', background: 'rgba(0,0,0,0.3)', padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', wordBreak: 'break-all' }}>
+                                {twoFactorSecretText}
+                              </code>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Step 2 */}
+                        <form onSubmit={handleVerify2FASetup} style={{ background: 'rgba(255,255,255,0.02)', padding: '16px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+                          <strong style={{ display: 'block', marginBottom: '8px', color: 'var(--text-main)' }}>
+                            2. กรอกรหัสยืนยันจากแอปพลิเคชัน
+                          </strong>
+                          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '16px', lineHeight: '1.5' }}>
+                            หลังจากสแกนแล้ว ให้นำรหัส OTP 6 หลักที่ปรากฏในแอปของคุณมากรอกเพื่อเปิดใช้งานระบบ
+                          </p>
+
+                          <div className="form-group" style={{ margin: '0 0 16px 0' }}>
+                            <input
+                              type="text"
+                              maxLength="6"
+                              className="input-field"
+                              placeholder="กรอกรหัส 6 หลัก (เช่น 123456)"
+                              value={twoFactorVerifyCode}
+                              onChange={(e) => setTwoFactorVerifyCode(e.target.value)}
+                              required
+                              style={{ textAlign: 'center', letterSpacing: '4px', fontSize: '1.2rem', fontWeight: '700', padding: '10px' }}
+                            />
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                            <button 
+                              type="button" 
+                              className="btn btn-secondary" 
+                              onClick={() => setTwoFactorSetupActive(false)}
+                              style={{ padding: '8px 16px' }}
+                            >
+                              ยกเลิกตั้งค่า
+                            </button>
+                            <button 
+                              type="submit" 
+                              className="btn btn-primary"
+                              disabled={loading}
+                              style={{ padding: '8px 20px', fontWeight: '600' }}
+                            >
+                              {loading ? 'กำลังเปิดใช้งาน...' : 'ยืนยันเพื่อเปิดใช้ 2FA'}
+                            </button>
+                          </div>
+                        </form>
+
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}

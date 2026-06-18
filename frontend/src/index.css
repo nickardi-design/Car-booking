@@ -782,12 +782,15 @@ body {
   
   .nav-links {
     display: flex;
-    justify-content: space-around;
+    justify-content: flex-start;
     width: 100%;
     order: 2; /* Nav items below profile details */
     border-top: 1px solid var(--border-color);
     padding-top: 12px;
     gap: 4px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
   }
 
   .nav-item {

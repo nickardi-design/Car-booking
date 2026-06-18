@@ -85,9 +85,40 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ username, password }),
     });
+    if (!data.require2FA) {
+      setToken(data.token);
+      setStoredUser(data.user);
+    }
+    return data;
+  },
+
+  verify2FALogin: async (userId, code) => {
+    const data = await request('/auth/login/2fa', {
+      method: 'POST',
+      body: JSON.stringify({ userId, code }),
+    });
     setToken(data.token);
     setStoredUser(data.user);
     return data;
+  },
+
+  setup2FA: () => {
+    return request('/auth/2fa/setup', {
+      method: 'POST',
+    });
+  },
+
+  verify2FASetup: (code) => {
+    return request('/auth/2fa/verify-setup', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+  },
+
+  disable2FA: () => {
+    return request('/auth/2fa/disable', {
+      method: 'POST',
+    });
   },
 
   register: (username, email, password, name) => {

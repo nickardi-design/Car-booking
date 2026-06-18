@@ -8,7 +8,9 @@
       "name": "ผู้ดูแลระบบ (Admin)",
       "role": "admin",
       "status": "active",
-      "createdAt": "2026-05-28T21:51:40+07:00"
+      "createdAt": "2026-05-28T21:51:40+07:00",
+      "twoFactorSecret": null,
+      "twoFactorEnabled": false
     },
     {
       "id": "u2",
@@ -18,7 +20,9 @@
       "name": "เจ้าหน้าที่จัดคิวรถ (Scheduler)",
       "role": "scheduler",
       "status": "active",
-      "createdAt": "2026-05-28T21:51:40+07:00"
+      "createdAt": "2026-05-28T21:51:40+07:00",
+      "twoFactorSecret": null,
+      "twoFactorEnabled": false
     },
     {
       "id": "u3",
