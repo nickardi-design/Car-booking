@@ -718,6 +718,17 @@ export default function App() {
     }
   };
 
+  // Test email sending
+  const handleTestEmail = async () => {
+    try {
+      addToast('กำลังทดสอบส่งอีเมล...', 'info');
+      const res = await api.testEmail();
+      addToast(res.message, 'success');
+    } catch (err) {
+      addToast(err.message, 'danger');
+    }
+  };
+
   // Admin Update Car Status
   const handleToggleCarStatus = async (carId, currentStatus) => {
     const newStatus = currentStatus === 'available' ? 'maintenance' : 'available';
@@ -1437,21 +1448,43 @@ export default function App() {
                 </p>
                 
                 {!editingSelfEmail ? (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
-                    <div>
-                      <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>อีเมลปัจจุบัน:</span>
-                      <div style={{ fontSize: '1.1rem', fontWeight: '600', marginTop: '4px' }}>{user?.email || '-'}</div>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
+                      <div>
+                        <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>อีเมลปัจจุบัน:</span>
+                        <div style={{ fontSize: '1.1rem', fontWeight: '600', marginTop: '4px' }}>{user?.email || '-'}</div>
+                      </div>
+                      <button 
+                        className="btn btn-secondary" 
+                        onClick={() => {
+                          setNewSelfEmail(user?.email || '');
+                          setEditingSelfEmail(true);
+                        }}
+                        style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+                      >
+                        ✏️ แก้ไขอีเมล
+                      </button>
                     </div>
-                    <button 
-                      className="btn btn-secondary" 
-                      onClick={() => {
-                        setNewSelfEmail(user?.email || '');
-                        setEditingSelfEmail(true);
-                      }}
-                      style={{ padding: '8px 16px', fontSize: '0.85rem' }}
-                    >
-                      ✏️ แก้ไขอีเมล
-                    </button>
+                    
+                    <div style={{ borderTop: '1px solid var(--border-color)', marginTop: '15px', paddingTop: '15px', display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={handleTestEmail}
+                        style={{ 
+                          padding: '8px 16px', 
+                          fontSize: '0.85rem', 
+                          color: 'var(--success)', 
+                          borderColor: 'var(--success-glow)',
+                          background: 'rgba(16, 185, 129, 0.05)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          fontWeight: '600'
+                        }}
+                      >
+                        🧪 ทดสอบส่งอีเมล
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>

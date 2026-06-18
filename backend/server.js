@@ -1099,6 +1099,56 @@ app.post('/api/auth/update-email', authenticateToken, async (req, res) => {
   }
 });
 
+// Test Email SMTP Configuration
+app.post('/api/auth/test-email', authenticateToken, async (req, res) => {
+  try {
+    const users = await db.getUsers();
+    const user = users.find(u => u.id === req.user.id);
+    if (!user) return res.status(404).json({ message: 'ไม่พบข้อมูลผู้ใช้งาน' });
+
+    const email = user.email;
+    if (!email || !email.includes('@') || email.endsWith('.local')) {
+      return res.status(400).json({ message: 'กรุณาตั้งค่าอีเมลของคุณให้เป็นอีเมลจริงก่อนทำการทดสอบ' });
+    }
+
+    const transporter = createMailTransporter();
+    if (!transporter) {
+      return res.status(400).json({ message: 'ระบบยังไม่ได้ตั้งค่าตัวแปร GMAIL_USER หรือ GMAIL_APP_PASSWORD บน Render' });
+    }
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f9f9f9; border-radius: 10px; overflow: hidden; border: 1px solid #ddd;">
+        <div style="background: linear-gradient(135deg, #10b981, #059669); padding: 30px; text-align: center;">
+          <h1 style="color: white; margin: 0; font-size: 1.5rem;">🧪 ทดสอบระบบส่งอีเมลสำเร็จ</h1>
+        </div>
+        <div style="padding: 30px; background: white;">
+          <p style="font-size: 1rem; color: #333;">เรียน คุณ${user.name},</p>
+          <p>อีเมลนี้เป็นอีเมลทดสอบเพื่อตรวจสอบการเชื่อมต่อระบบ SMTP ของคุณ</p>
+          <p style="background:#f0fdf4; border: 1px solid #86efac; border-radius:8px; padding:15px; margin-top:20px; color:#166534;">
+            <strong>✅ การเชื่อมต่อสำเร็จเรียบร้อย!</strong><br>
+            ระบบการส่งเมลแจ้งเตือนการจองรถยนต์และแนบไฟล์ปฏิทิน (.ics) พร้อมใช้งานแล้ว
+          </p>
+        </div>
+        <div style="background:#f3f4f6; padding:15px; text-align:center; font-size:0.8rem; color:#888;">
+          ระบบจองรถยนต์ส่วนกลาง • อีเมลนี้สร้างโดยระบบอัตโนมัติ
+        </div>
+      </div>
+    `;
+
+    await transporter.sendMail({
+      from: `"ระบบจองรถยนต์ (ทดสอบ)" <${process.env.GMAIL_USER}>`,
+      to: email,
+      subject: `🧪 ทดสอบการส่งอีเมล — ${new Date().toLocaleTimeString('th-TH')}`,
+      html
+    });
+
+    res.json({ message: 'ส่งอีเมลทดสอบไปยังกล่องจดหมายของคุณเรียบร้อยแล้ว!' });
+  } catch (err) {
+    console.error('Test email sending failed:', err);
+    res.status(500).json({ message: `การส่งอีเมลล้มเหลว: ${err.message}` });
+  }
+});
+
 // Setup 2FA - Generate secret
 app.post('/api/auth/2fa/setup', authenticateToken, async (req, res) => {
   try {

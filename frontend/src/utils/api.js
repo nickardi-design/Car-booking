@@ -199,6 +199,11 @@ export const api = {
       body: JSON.stringify({ email }),
     });
   },
+  testEmail: () => {
+    return request('/auth/test-email', {
+      method: 'POST',
+    });
+  },
   resetSystem: () => {
     return request('/admin/reset-system', {
       method: 'POST',
