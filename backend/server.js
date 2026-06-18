@@ -1133,24 +1133,31 @@ app.post('/api/auth/test-email', authenticateToken, async (req, res) => {
 
     // Run connection diagnostics
     diagnostic = await new Promise((resolve) => {
-      dns.lookup('smtp.gmail.com', { family: 4 }, (dnsErr, address) => {
+      dns.lookup('smtp.gmail.com', { family: 4 }, async (dnsErr, address) => {
         if (dnsErr) {
           return resolve(`DNS lookup failed: ${dnsErr.message}`);
         }
-        const socket = new net.Socket();
-        socket.setTimeout(5000);
-        socket.connect(465, address, () => {
-          socket.destroy();
-          resolve(`Successfully connected to smtp.gmail.com (${address}) on port 465`);
+        
+        const testPort = (port) => new Promise((resPort) => {
+          const socket = new net.Socket();
+          socket.setTimeout(4000);
+          socket.connect(port, address, () => {
+            socket.destroy();
+            resPort(`Port ${port}: Success`);
+          });
+          socket.on('error', (err) => {
+            socket.destroy();
+            resPort(`Port ${port}: Error (${err.message})`);
+          });
+          socket.on('timeout', () => {
+            socket.destroy();
+            resPort(`Port ${port}: Timeout`);
+          });
         });
-        socket.on('error', (connectErr) => {
-          socket.destroy();
-          resolve(`Failed to connect to smtp.gmail.com (${address}) on port 465: ${connectErr.message}`);
-        });
-        socket.on('timeout', () => {
-          socket.destroy();
-          resolve(`Timeout connecting to smtp.gmail.com (${address}) on port 465`);
-        });
+
+        const res465 = await testPort(465);
+        const res587 = await testPort(587);
+        resolve(`smtp.gmail.com (${address}) -> ${res465}, ${res587}`);
       });
     });
     console.log('SMTP connection diagnostic result:', diagnostic);
