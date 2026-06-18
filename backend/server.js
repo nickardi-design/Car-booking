@@ -609,6 +609,10 @@ const formatThaiDateTime = (dateString) => {
 // --- EMAIL + ICS CALENDAR NOTIFICATION SYSTEM ---
 
 // Create Gmail SMTP transporter (uses env vars GMAIL_USER + GMAIL_APP_PASSWORD)
+const ipv4Lookup = (hostname, options, callback) => {
+  return dns.lookup(hostname, { family: 4 }, callback);
+};
+
 const createMailTransporter = () => {
   const user = process.env.GMAIL_USER;
   const pass = process.env.GMAIL_APP_PASSWORD;
@@ -618,7 +622,7 @@ const createMailTransporter = () => {
     port: 465,
     secure: true,
     auth: { user, pass },
-    family: 4 // บังคับใช้งาน IPv4
+    lookup: ipv4Lookup
   });
 };
 
@@ -1152,7 +1156,7 @@ app.post('/api/auth/test-email', authenticateToken, async (req, res) => {
     res.json({ message: 'ส่งอีเมลทดสอบไปยังกล่องจดหมายของคุณเรียบร้อยแล้ว!' });
   } catch (err) {
     console.error('Test email sending failed:', err);
-    res.status(500).json({ message: `การส่งอีเมลล้มเหลว: ${err.message}` });
+    res.status(500).json({ message: `การส่งอีเมลล้มเหลว (v3): ${err.message}` });
   }
 });
 
