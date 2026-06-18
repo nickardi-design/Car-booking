@@ -9,6 +9,10 @@ import pkg from 'pg';
 import cron from 'node-cron';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
+import dns from 'dns';
+
+// บังคับให้ Node.js ค้นหาและใช้ IPv4 เป็นหลักเพื่อแก้ปัญหา ENETUNREACH บนระบบ Render
+dns.setDefaultResultOrder('ipv4first');
 
 // --- NATIVE TOTP / 2FA HELPERS ---
 
@@ -610,9 +614,11 @@ const createMailTransporter = () => {
   const pass = process.env.GMAIL_APP_PASSWORD;
   if (!user || !pass) return null;
   return nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
     auth: { user, pass },
-    family: 4 // บังคับใช้งาน IPv4 เพื่อป้องกันปัญหา Network Unreachable (ENETUNREACH) บนระบบ Render
+    family: 4 // บังคับใช้งาน IPv4
   });
 };
 
