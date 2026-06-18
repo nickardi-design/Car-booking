@@ -10,6 +10,7 @@ import cron from 'node-cron';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import dns from 'dns';
+import net from 'net';
 
 // บังคับให้ Node.js ค้นหาและใช้ IPv4 เป็นหลักเพื่อแก้ปัญหา ENETUNREACH บนระบบ Render
 dns.setDefaultResultOrder('ipv4first');
@@ -1136,7 +1137,7 @@ app.post('/api/auth/test-email', authenticateToken, async (req, res) => {
         if (dnsErr) {
           return resolve(`DNS lookup failed: ${dnsErr.message}`);
         }
-        const socket = new require('net').Socket();
+        const socket = new net.Socket();
         socket.setTimeout(5000);
         socket.connect(465, address, () => {
           socket.destroy();
