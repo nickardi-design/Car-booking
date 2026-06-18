@@ -187,6 +187,18 @@ export const api = {
       body: JSON.stringify({ role }),
     });
   },
+  changeEmail: (id, email) => {
+    return request(`/admin/users/${id}/email`, {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
+  updateOwnEmail: (email) => {
+    return request('/auth/update-email', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
   resetSystem: () => {
     return request('/admin/reset-system', {
       method: 'POST',

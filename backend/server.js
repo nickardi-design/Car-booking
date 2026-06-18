@@ -181,6 +181,17 @@ const db = {
     }
   },
 
+  updateUserEmail: async (id, email) => {
+    if (usePostgres) {
+      await pgPool.query('UPDATE users SET email = $1 WHERE id = $2', [email, id]);
+    } else {
+      const data = readDB();
+      const u = data.users.find(x => x.id === id);
+      if (u) u.email = email;
+      writeDB(data);
+    }
+  },
+
   getLineLinks: async (userId) => {
     if (usePostgres) {
       const res = await pgPool.query('SELECT * FROM user_line_links WHERE user_id = $1', [userId]);
@@ -1063,6 +1074,31 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
   }
 });
 
+// Update self email
+app.post('/api/auth/update-email', authenticateToken, async (req, res) => {
+  const { email } = req.body;
+
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ message: 'รูปแบบอีเมลไม่ถูกต้อง' });
+  }
+
+  try {
+    const users = await db.getUsers();
+    const user = users.find(u => u.id === req.user.id);
+    if (!user) return res.status(404).json({ message: 'ไม่พบข้อมูลผู้ใช้งาน' });
+
+    // Check if email already registered by other user
+    if (email.toLowerCase() !== user.email.toLowerCase() && users.some(u => u.email.toLowerCase() === email.toLowerCase())) {
+      return res.status(400).json({ message: 'อีเมลนี้ถูกลงทะเบียนการใช้งานไปแล้วโดยผู้ใช้อื่น' });
+    }
+
+    await db.updateUserEmail(req.user.id, email.toLowerCase());
+    res.json({ message: 'อัปเดตอีเมลของคุณเรียบร้อยแล้ว', email: email.toLowerCase() });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'ไม่สามารถแก้ไขอีเมลได้' });
+  }
+});
+
 // Setup 2FA - Generate secret
 app.post('/api/auth/2fa/setup', authenticateToken, async (req, res) => {
   try {
@@ -1526,13 +1562,39 @@ app.post('/api/bookings/:id/reject', authenticateToken, requireRole(['admin', 's
 });
 
 // List Users for Admin
-app.get('/api/admin/users', authenticateToken, requireRole(['admin']), async (req, res) => {
+app.get('/api/admin/users', authenticateToken, requireRole(['admin', 'scheduler']), async (req, res) => {
   try {
     const users = await db.getUsers();
     const safeUsers = users.map(({ password, ...u }) => u);
     res.json(safeUsers);
   } catch (err) {
     res.status(500).json({ message: err.message || 'ไม่สามารถดึงข้อมูลสมาชิกได้' });
+  }
+});
+
+// Admin/Scheduler update User email
+app.post('/api/admin/users/:id/email', authenticateToken, requireRole(['admin', 'scheduler']), async (req, res) => {
+  const { id } = req.params;
+  const { email } = req.body;
+
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ message: 'รูปแบบอีเมลไม่ถูกต้อง' });
+  }
+
+  try {
+    const users = await db.getUsers();
+    const user = users.find(u => u.id === id);
+    if (!user) return res.status(404).json({ message: 'ไม่พบข้อมูลผู้ใช้งาน' });
+
+    // Check email uniqueness if changed
+    if (email.toLowerCase() !== user.email.toLowerCase() && users.some(u => u.email.toLowerCase() === email.toLowerCase())) {
+      return res.status(400).json({ message: 'อีเมลนี้ถูกใช้งานโดยผู้ใช้อื่นแล้ว' });
+    }
+
+    await db.updateUserEmail(id, email.toLowerCase());
+    res.json({ message: 'อัปเดตอีเมลเรียบร้อยแล้ว', email: email.toLowerCase() });
+  } catch (err) {
+    res.status(500).json({ message: err.message || 'ไม่สามารถแก้ไขอีเมลของสมาชิกได้' });
   }
 });
 

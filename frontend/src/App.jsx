@@ -37,6 +37,12 @@ export default function App() {
   const [cars, setCars] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [users, setUsers] = useState([]);
+
+  // Email management states
+  const [editingUserId, setEditingUserId] = useState(null);
+  const [editingEmail, setEditingEmail] = useState('');
+  const [editingSelfEmail, setEditingSelfEmail] = useState(false);
+  const [newSelfEmail, setNewSelfEmail] = useState('');
   
   // App UI/Interaction States
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -175,10 +181,8 @@ export default function App() {
   const fetchAdminData = async () => {
     if (user?.role !== 'admin' && user?.role !== 'scheduler') return;
     try {
-      if (user.role === 'admin') {
-        const fetchedUsers = await api.getUsers();
-        setUsers(fetchedUsers);
-      }
+      const fetchedUsers = await api.getUsers();
+      setUsers(fetchedUsers);
     } catch (err) {
       addToast(err.message, 'danger');
     }
@@ -679,6 +683,41 @@ export default function App() {
     }
   };
 
+  // Admin/Scheduler edit user email
+  const handleSaveUserEmail = async (userId) => {
+    if (!editingEmail || !editingEmail.includes('@')) {
+      addToast('กรุณากรอกรูปแบบอีเมลให้ถูกต้อง', 'danger');
+      return;
+    }
+    try {
+      const res = await api.changeEmail(userId, editingEmail);
+      addToast(res.message, 'success');
+      setEditingUserId(null);
+      fetchAdminData();
+    } catch (err) {
+      addToast(err.message, 'danger');
+    }
+  };
+
+  // Update own email
+  const handleSaveOwnEmail = async () => {
+    if (!newSelfEmail || !newSelfEmail.includes('@')) {
+      addToast('กรุณากรอกรูปแบบอีเมลให้ถูกต้อง', 'danger');
+      return;
+    }
+    try {
+      const res = await api.updateOwnEmail(newSelfEmail);
+      addToast(res.message, 'success');
+      setEditingSelfEmail(false);
+      // Update local storage and context state
+      const updatedUser = { ...user, email: res.email };
+      setUser(updatedUser);
+      localStorage.setItem('booking_user', JSON.stringify(updatedUser));
+    } catch (err) {
+      addToast(err.message, 'danger');
+    }
+  };
+
   // Admin Update Car Status
   const handleToggleCarStatus = async (carId, currentStatus) => {
     const newStatus = currentStatus === 'available' ? 'maintenance' : 'available';
@@ -903,8 +942,8 @@ export default function App() {
               💬 จัดการ LINE {user?.lineLinks?.length > 0 ? `(${user.lineLinks.length})` : ''}
             </div>
           )}
-          <div className={`nav-item ${activeTab === 'security' ? 'active' : ''}`} onClick={() => handleTabChange('security')}>
-            🔒 ความปลอดภัย (2FA)
+          <div className={`nav-item ${activeTab === 'security' ? 'active' : ''}`} onClick={() => handleTabChange('security')} title="ข้อมูลส่วนตัวและความปลอดภัย" style={{ fontSize: '1.25rem' }}>
+            🔒
           </div>
           {(user?.role === 'admin' || user?.role === 'scheduler') && (
             <div className={`nav-item ${activeTab === 'admin' ? 'active' : ''}`} onClick={() => handleTabChange('admin')}>
@@ -1377,12 +1416,75 @@ export default function App() {
           </div>
         )}
 
-        {/* 5. TWO-FACTOR AUTHENTICATION SECURITY VIEW */}
+        {/* 5. PROFILE & TWO-FACTOR AUTHENTICATION SECURITY VIEW */}
         {activeTab === 'security' && (
           <div style={{ padding: '24px 5%', maxWidth: '600px', margin: '0 auto' }}>
+            
+            {/* Card 1: 📧 จัดการอีเมลส่วนตัว */}
+            <div className="glass-panel" style={{ padding: '24px', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: '700', margin: '0' }}>📧 จัดการอีเมลส่วนตัว</h3>
+              </div>
+              <div>
+                <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '16px' }}>
+                  อีเมลนี้ใช้สำหรับการรับเอกสารการจองและไฟล์ปฏิทินนัดหมาย (.ics) อัตโนมัติ
+                </p>
+                
+                {!editingSelfEmail ? (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
+                    <div>
+                      <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>อีเมลปัจจุบัน:</span>
+                      <div style={{ fontSize: '1.1rem', fontWeight: '600', marginTop: '4px' }}>{user?.email || '-'}</div>
+                    </div>
+                    <button 
+                      className="btn btn-secondary" 
+                      onClick={() => {
+                        setNewSelfEmail(user?.email || '');
+                        setEditingSelfEmail(true);
+                      }}
+                      style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+                    >
+                      ✏️ แก้ไขอีเมล
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>
+                    <div className="form-group">
+                      <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>ระบุอีเมลใหม่</label>
+                      <input 
+                        type="email" 
+                        value={newSelfEmail}
+                        onChange={(e) => setNewSelfEmail(e.target.value)}
+                        placeholder="example@company.com"
+                        className="form-control"
+                        style={{ marginTop: '6px' }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                      <button 
+                        className="btn btn-secondary" 
+                        onClick={() => setEditingSelfEmail(false)}
+                        style={{ padding: '6px 12px', fontSize: '0.85rem' }}
+                      >
+                        ยกเลิก
+                      </button>
+                      <button 
+                        className="btn btn-primary" 
+                        onClick={handleSaveOwnEmail}
+                        style={{ padding: '6px 16px', fontSize: '0.85rem', fontWeight: '600' }}
+                      >
+                        บันทึกอีเมล
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Card 2: 🔒 ระบบยืนยันตัวตนสองขั้นตอน (2FA) */}
             <div className="glass-panel" style={{ padding: '24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: '700', margin: '0' }}>🔒 ความปลอดภัยและการยืนยันตัวตน</h3>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: '700', margin: '0' }}>🔒 ระบบยืนยันตัวตน 2 ชั้น (2FA)</h3>
                 <span className={`badge ${user?.twoFactorEnabled ? 'badge-approved' : 'badge-pending'}`} style={{ fontSize: '0.8rem', padding: '4px 10px' }}>
                   {user?.twoFactorEnabled ? '🟢 เปิดใช้งานแล้ว' : '⚪ ยังไม่ได้เปิดใช้'}
                 </span>
@@ -1527,13 +1629,13 @@ export default function App() {
                   >
                     อนุมัติการจองรถ ({bookings.filter(b => b.status === 'pending').length})
                   </button>
-                  {user?.role === 'admin' && (
+                  {(user?.role === 'admin' || user?.role === 'scheduler') && (
                     <button
                       className={`btn ${adminSubTab === 'user-activation' ? 'btn-primary' : 'btn-secondary'}`}
                       style={{ padding: '6px 14px', fontSize: '0.85rem' }}
                       onClick={() => setAdminSubTab('user-activation')}
                     >
-                      อนุมัติผู้ใช้งาน ({users.filter(u => u.status === 'pending').length})
+                      จัดการสมาชิกและอีเมล ({users.filter(u => u.status === 'pending').length})
                     </button>
                   )}
                   <button
@@ -1641,8 +1743,8 @@ export default function App() {
                 </div>
               )}
 
-              {/* Sub-Tab 2: User Account Activation (Admin Only) */}
-              {adminSubTab === 'user-activation' && user?.role === 'admin' && (
+              {/* Sub-Tab 2: User Account Activation (Admin & Scheduler) */}
+              {adminSubTab === 'user-activation' && (user?.role === 'admin' || user?.role === 'scheduler') && (
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                     <h4 style={{ fontWeight: '600' }}>👥 บัญชีผู้ใช้ในระบบทั้งหมด ({users.length} / 30 คน)</h4>
@@ -1668,10 +1770,51 @@ export default function App() {
                           <tr key={u.id}>
                             <td><strong>{u.name}</strong> {u.id === user.id && <span style={{ color: 'var(--primary)', fontSize: '0.75rem' }}>(บัญชีของคุณ)</span>}</td>
                             <td><code>{u.username}</code></td>
-                            <td>{u.email}</td>
+                            <td>
+                              {editingUserId === u.id ? (
+                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                  <input
+                                    type="email"
+                                    value={editingEmail}
+                                    onChange={(e) => setEditingEmail(e.target.value)}
+                                    className="form-control"
+                                    style={{ padding: '4px 8px', fontSize: '0.85rem', width: '180px' }}
+                                  />
+                                  <button
+                                    className="btn btn-success"
+                                    style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                                    onClick={() => handleSaveUserEmail(u.id)}
+                                  >
+                                    💾
+                                  </button>
+                                  <button
+                                    className="btn btn-secondary"
+                                    style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                                    onClick={() => setEditingUserId(null)}
+                                  >
+                                    ❌
+                                  </button>
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <span>{u.email}</span>
+                                  <button
+                                    className="btn btn-secondary"
+                                    style={{ padding: '2px 6px', fontSize: '0.7rem', border: 'none', background: 'rgba(255,255,255,0.05)' }}
+                                    onClick={() => {
+                                      setEditingUserId(u.id);
+                                      setEditingEmail(u.email || '');
+                                    }}
+                                    title="แก้ไขอีเมล"
+                                  >
+                                    ✏️
+                                  </button>
+                                </div>
+                              )}
+                            </td>
                             <td>
                               <span className={`badge badge-${u.role}`} style={{ marginRight: '8px' }}>{u.role}</span>
-                              {u.id !== user.id && (
+                              {u.id !== user.id && user?.role === 'admin' && (
                                 <button
                                   className="btn btn-secondary"
                                   style={{ padding: '2px 6px', fontSize: '0.7rem' }}
@@ -1687,37 +1830,44 @@ export default function App() {
                               </span>
                             </td>
                             <td>
-                              {u.status === 'pending' && (
-                                <button
-                                  className="btn btn-success"
-                                  style={{ padding: '6px 12px', fontSize: '0.8rem' }}
-                                  onClick={() => handleApproveUser(u.id)}
-                                >
-                                  อนุมัติบัญชี
-                                </button>
-                              )}
-                              {u.status === 'active' && u.id !== user.id && (
-                                <button
-                                  className="btn btn-secondary"
-                                  style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--danger)', borderColor: 'var(--danger-glow)' }}
-                                  onClick={() => handleSuspendUser(u.id)}
-                                >
-                                  ระงับบัญชี
-                                </button>
-                              )}
-                              {u.status === 'suspended' && (
-                                <button
-                                  className="btn btn-success"
-                                  style={{ padding: '6px 12px', fontSize: '0.8rem' }}
-                                  onClick={() => handleApproveUser(u.id)}
-                                >
-                                  ยกเลิกระงับ
-                                </button>
+                              {user?.role === 'admin' ? (
+                                <>
+                                  {u.status === 'pending' && (
+                                    <button
+                                      className="btn btn-success"
+                                      style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+                                      onClick={() => handleApproveUser(u.id)}
+                                    >
+                                      อนุมัติบัญชี
+                                    </button>
+                                  )}
+                                  {u.status === 'active' && u.id !== user.id && (
+                                    <button
+                                      className="btn btn-secondary"
+                                      style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--danger)', borderColor: 'var(--danger-glow)' }}
+                                      onClick={() => handleSuspendUser(u.id)}
+                                    >
+                                      ระงับบัญชี
+                                    </button>
+                                  )}
+                                  {u.status === 'suspended' && (
+                                    <button
+                                      className="btn btn-success"
+                                      style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+                                      onClick={() => handleApproveUser(u.id)}
+                                    >
+                                      ยกเลิกระงับ
+                                    </button>
+                                  )}
+                                </>
+                              ) : (
+                                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>เฉพาะแอดมิน</span>
                               )}
                             </td>
                           </tr>
                         ))}
                       </tbody>
+
                     </table>
                   </div>
                 </div>
