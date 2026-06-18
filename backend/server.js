@@ -8,6 +8,7 @@ import jwt from 'jsonwebtoken';
 import pkg from 'pg';
 import cron from 'node-cron';
 import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 
 // --- NATIVE TOTP / 2FA HELPERS ---
 
@@ -590,8 +591,205 @@ const formatThaiDateTime = (dateString) => {
   return `${day} ${month} ${String(year).slice(-2)} เวลา ${h}:${min} น.`;
 };
 
+// --- EMAIL + ICS CALENDAR NOTIFICATION SYSTEM ---
+
+// Create Gmail SMTP transporter (uses env vars GMAIL_USER + GMAIL_APP_PASSWORD)
+const createMailTransporter = () => {
+  const user = process.env.GMAIL_USER;
+  const pass = process.env.GMAIL_APP_PASSWORD;
+  if (!user || !pass) return null;
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user, pass }
+  });
+};
+
+// Generate ICS file content for a booking event
+const generateICS = (booking, carModel, approvedBy, driver) => {
+  const pad = (n) => String(n).padStart(2, '0');
+  const toICSDate = (isoString) => {
+    const d = new Date(isoString);
+    return [
+      d.getUTCFullYear(),
+      pad(d.getUTCMonth() + 1),
+      pad(d.getUTCDate()),
+      'T',
+      pad(d.getUTCHours()),
+      pad(d.getUTCMinutes()),
+      '00Z'
+    ].join('');
+  };
+  const now = toICSDate(new Date().toISOString());
+  const start = toICSDate(booking.startTime);
+  const end = toICSDate(booking.endTime);
+  const uid = `booking_${booking.id}@carbooking.system`;
+  const summary = `🚗 จองรถ: ${carModel || 'รถยนต์'} — ${booking.purpose || ''}`;
+  const description = [
+    `วัตถุประสงค์: ${booking.purpose || '-'}`,
+    `รถยนต์: ${carModel || '-'}`,
+    `คนขับ: ${driver || '-'}`,
+    `ผู้อนุมัติ: ${approvedBy || '-'}`,
+    `ปลายทาง: ${booking.destination || '-'}`,
+    `ผู้โดยสาร: ${booking.passengers || 1} คน`
+  ].join('\n');
+
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Car Booking System//TH',
+    'CALSCALE:GREGORIAN',
+    'METHOD:REQUEST',
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    `DTSTAMP:${now}`,
+    `DTSTART:${start}`,
+    `DTEND:${end}`,
+    `SUMMARY:${summary}`,
+    `DESCRIPTION:${description.replace(/\n/g, '\\n')}`,
+    `LOCATION:${booking.destination || ''}`,
+    'STATUS:CONFIRMED',
+    'BEGIN:VALARM',
+    'TRIGGER:-PT30M',
+    'ACTION:DISPLAY',
+    'DESCRIPTION:แจ้งเตือน: การจองรถยนต์ของคุณจะเริ่มใน 30 นาที',
+    'END:VALARM',
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+};
+
+// Generate cancellation ICS (METHOD:CANCEL)
+const generateCancelICS = (booking, carModel) => {
+  const pad = (n) => String(n).padStart(2, '0');
+  const toICSDate = (isoString) => {
+    const d = new Date(isoString);
+    return [d.getUTCFullYear(), pad(d.getUTCMonth() + 1), pad(d.getUTCDate()), 'T', pad(d.getUTCHours()), pad(d.getUTCMinutes()), '00Z'].join('');
+  };
+  const now = toICSDate(new Date().toISOString());
+  const start = toICSDate(booking.startTime);
+  const end = toICSDate(booking.endTime);
+  const uid = `booking_${booking.id}@carbooking.system`;
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Car Booking System//TH',
+    'CALSCALE:GREGORIAN',
+    'METHOD:CANCEL',
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    `DTSTAMP:${now}`,
+    `DTSTART:${start}`,
+    `DTEND:${end}`,
+    `SUMMARY:❌ ยกเลิก: ${carModel || 'รถยนต์'} — ${booking.purpose || ''}`,
+    'STATUS:CANCELLED',
+    'SEQUENCE:1',
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+};
+
+// Send approval email with ICS attachment
+const sendApprovalEmail = async (toEmail, toName, booking, carModel, approvedBy, driver, notes) => {
+  const transporter = createMailTransporter();
+  if (!transporter) {
+    console.log('Email not configured: GMAIL_USER or GMAIL_APP_PASSWORD missing');
+    return;
+  }
+  const icsContent = generateICS(booking, carModel, approvedBy, driver);
+  const startStr = formatThaiDateTime(booking.startTime);
+  const endStr = formatThaiDateTime(booking.endTime);
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f9f9f9; border-radius: 10px; overflow: hidden;">
+      <div style="background: linear-gradient(135deg, #667eea, #764ba2); padding: 30px; text-align: center;">
+        <h1 style="color: white; margin: 0; font-size: 1.5rem;">✅ การจองรถยนต์ได้รับการอนุมัติ</h1>
+      </div>
+      <div style="padding: 30px; background: white;">
+        <p style="font-size: 1rem; color: #333;">เรียน คุณ${toName},</p>
+        <p>การขอจองรถยนต์ของคุณได้รับการอนุมัติเรียบร้อยแล้ว</p>
+        <table style="width:100%; border-collapse: collapse; margin: 20px 0;">
+          <tr style="background:#f3f4f6;"><td style="padding:10px; font-weight:bold;">🚗 รถยนต์</td><td style="padding:10px;">${carModel || '-'}</td></tr>
+          <tr><td style="padding:10px; font-weight:bold;">📅 เริ่ม</td><td style="padding:10px;">${startStr}</td></tr>
+          <tr style="background:#f3f4f6;"><td style="padding:10px; font-weight:bold;">🔔 สิ้นสุด</td><td style="padding:10px;">${endStr}</td></tr>
+          <tr><td style="padding:10px; font-weight:bold;">🎯 วัตถุประสงค์</td><td style="padding:10px;">${booking.purpose || '-'}</td></tr>
+          <tr style="background:#f3f4f6;"><td style="padding:10px; font-weight:bold;">🧑‍✈️ คนขับ</td><td style="padding:10px;">${driver || '-'}</td></tr>
+          <tr><td style="padding:10px; font-weight:bold;">✍️ หมายเหตุ</td><td style="padding:10px;">${notes || '-'}</td></tr>
+          <tr style="background:#f3f4f6;"><td style="padding:10px; font-weight:bold;">👤 อนุมัติโดย</td><td style="padding:10px;">${approvedBy}</td></tr>
+        </table>
+        <div style="background:#f0fdf4; border: 1px solid #86efac; border-radius:8px; padding:15px; margin-top:20px;">
+          <strong>📅 เพิ่มลงปฏิทิน</strong><br>
+          <span style="font-size:0.9rem; color:#555;">เปิดไฟล์ <b>booking.ics</b> ที่แนบมา แล้วคลิก "เพิ่มในปฏิทิน" ใน Outlook หรือ Google Calendar ได้เลย</span>
+        </div>
+      </div>
+      <div style="background:#f3f4f6; padding:15px; text-align:center; font-size:0.8rem; color:#888;">
+        ระบบจองรถยนต์ส่วนกลาง • อีเมลนี้สร้างโดยระบบอัตโนมัติ
+      </div>
+    </div>
+  `;
+  try {
+    await transporter.sendMail({
+      from: `"ระบบจองรถยนต์" <${process.env.GMAIL_USER}>`,
+      to: toEmail,
+      subject: `✅ อนุมัติการจองรถ: ${carModel} — ${startStr}`,
+      html,
+      attachments: [{
+        filename: 'booking.ics',
+        content: icsContent,
+        contentType: 'text/calendar; charset=utf-8; method=REQUEST'
+      }]
+    });
+    console.log(`Approval email sent to ${toEmail}`);
+  } catch (err) {
+    console.error('Failed to send approval email:', err.message);
+  }
+};
+
+// Send rejection/cancellation email
+const sendRejectionEmail = async (toEmail, toName, booking, carModel, reason, actionBy) => {
+  const transporter = createMailTransporter();
+  if (!transporter) return;
+  const icsContent = generateCancelICS(booking, carModel);
+  const startStr = formatThaiDateTime(booking.startTime);
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background: linear-gradient(135deg, #ef4444, #b91c1c); padding: 30px; text-align: center; border-radius:10px 10px 0 0;">
+        <h1 style="color: white; margin: 0; font-size: 1.5rem;">❌ การจองรถยนต์ไม่ได้รับการอนุมัติ</h1>
+      </div>
+      <div style="padding: 30px; background: white;">
+        <p>เรียน คุณ${toName},</p>
+        <p>เราขอแจ้งให้ทราบว่าการขอจองรถยนต์ของคุณไม่ได้รับการอนุมัติ</p>
+        <table style="width:100%; border-collapse: collapse; margin: 20px 0;">
+          <tr style="background:#fef2f2;"><td style="padding:10px; font-weight:bold;">🚗 รถยนต์</td><td style="padding:10px;">${carModel || '-'}</td></tr>
+          <tr><td style="padding:10px; font-weight:bold;">📅 วันเวลา</td><td style="padding:10px;">${startStr}</td></tr>
+          <tr style="background:#fef2f2;"><td style="padding:10px; font-weight:bold;">❗ เหตุผล</td><td style="padding:10px; color:#b91c1c; font-weight:600;">${reason}</td></tr>
+          <tr><td style="padding:10px; font-weight:bold;">👤 โดย</td><td style="padding:10px;">${actionBy}</td></tr>
+        </table>
+        <p style="font-size:0.9rem; color:#555;">คุณสามารถส่งคำขอจองใหม่ได้ที่หน้าเว็บไซต์</p>
+      </div>
+      <div style="background:#f3f4f6; padding:15px; text-align:center; font-size:0.8rem; color:#888; border-radius:0 0 10px 10px;">
+        ระบบจองรถยนต์ส่วนกลาง • อีเมลนี้สร้างโดยระบบอัตโนมัติ
+      </div>
+    </div>
+  `;
+  try {
+    await transporter.sendMail({
+      from: `"ระบบจองรถยนต์" <${process.env.GMAIL_USER}>`,
+      to: toEmail,
+      subject: `❌ ไม่อนุมัติการจองรถ: ${carModel} — ${startStr}`,
+      html,
+      attachments: [{
+        filename: 'cancel.ics',
+        content: icsContent,
+        contentType: 'text/calendar; charset=utf-8; method=CANCEL'
+      }]
+    });
+    console.log(`Rejection email sent to ${toEmail}`);
+  } catch (err) {
+    console.error('Failed to send rejection email:', err.message);
+  }
+};
+
 const sendNotification = async (type, recipient, subject, messageText) => {
-  // Email and LINE notification functionality has been removed
+  // Legacy stub — kept for backward compatibility
 };
 
 const getBangkokTodayString = () => {
@@ -1268,17 +1466,16 @@ app.post('/api/bookings/:id/approve', authenticateToken, requireRole(['admin', '
     const targetUser = users.find(u => u.id === booking.userId);
 
     if (targetUser) {
-      await sendNotification(
-        'email',
+      // Send approval email with ICS calendar attachment
+      const carModel = car ? `${car.model} (${car.color})` : 'รถยนต์';
+      await sendApprovalEmail(
         targetUser.email,
-        'คำขอจองรถยนต์ของคุณได้รับการอนุมัติแล้ว',
-        `ยินดีด้วย! คำขอจองรถยนต์ ${car ? car.model : ''} (${car ? car.color : ''})\nวันเวลา: ${formatThaiDateTime(booking.startTime)} - ${formatThaiDateTime(booking.endTime)}\nวัตถุประสงค์: ${booking.purpose}\nได้รับการอนุมัติแล้วโดย ${req.user.name}\nหมายเหตุ: ${noteText}`
-      );
-      await sendNotification(
-        'line',
-        targetUser.id,
-        '✅ คำขอจองรถยนต์ได้รับการอนุมัติ',
-        `รถ: ${car ? car.model : ''}\nเวลา: ${formatThaiDateTime(booking.startTime)}\nคนขับ: ${finalDriver || 'ไม่ระบุ'}\nผู้อนุมัติ: ${req.user.name}\nหมายเหตุ: ${noteText}`
+        targetUser.name,
+        booking,
+        carModel,
+        req.user.name,
+        finalDriver,
+        noteText
       );
     }
 
@@ -1310,17 +1507,15 @@ app.post('/api/bookings/:id/reject', authenticateToken, requireRole(['admin', 's
     const targetUser = users.find(u => u.id === booking.userId);
 
     if (targetUser) {
-      await sendNotification(
-        'email',
+      // Send rejection email with cancel ICS attachment
+      const carModel = car ? `${car.model} (${car.color})` : 'รถยนต์';
+      await sendRejectionEmail(
         targetUser.email,
-        'คำขอจองรถยนต์ของคุณถูกปฏิเสธ',
-        `คำขอจองรถยนต์ ${car ? car.model : ''} สำหรับวันที่ ${formatThaiDateTime(booking.startTime)} ไม่ได้รับการอนุมัติ\nเหตุผล: ${notes}\nตรวจสอบหรือจองใหม่ได้ที่หน้าเว็บไซต์`
-      );
-      await sendNotification(
-        'line',
-        targetUser.id,
-        '❌ คำขอจองรถยนต์ไม่ได้รับการอนุมัติ',
-        `รถ: ${car ? car.model : ''}\nวันเวลา: ${formatThaiDate(booking.startTime)}\nเหตุผล: ${notes}\nโดย: ${req.user.name}`
+        targetUser.name,
+        booking,
+        carModel,
+        notes,
+        req.user.name
       );
     }
 
