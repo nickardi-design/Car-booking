@@ -942,9 +942,6 @@ export default function App() {
               💬 จัดการ LINE {user?.lineLinks?.length > 0 ? `(${user.lineLinks.length})` : ''}
             </div>
           )}
-          <div className={`nav-item ${activeTab === 'security' ? 'active' : ''}`} onClick={() => handleTabChange('security')} title="ข้อมูลส่วนตัวและความปลอดภัย" style={{ fontSize: '1.25rem' }}>
-            🔒
-          </div>
           {(user?.role === 'admin' || user?.role === 'scheduler') && (
             <div className={`nav-item ${activeTab === 'admin' ? 'active' : ''}`} onClick={() => handleTabChange('admin')}>
               🛡️ จัดการคำขอจอง {bookings.filter(b => b.status === 'pending').length > 0 && <span style={{ background: 'var(--danger)', color: 'white', fontSize: '0.7rem', padding: '2px 6px', borderRadius: '10px', marginLeft: '4px' }}>{bookings.filter(b => b.status === 'pending').length}</span>}
@@ -983,6 +980,15 @@ export default function App() {
               💬 จัดการ LINE {user?.lineLinks?.length > 0 ? `(${user.lineLinks.length})` : ''}
             </button>
           )}
+
+          <button 
+            className={`btn ${activeTab === 'security' ? 'btn-primary' : 'btn-secondary'}`} 
+            onClick={() => handleTabChange('security')} 
+            title="ข้อมูลส่วนตัวและความปลอดภัย" 
+            style={{ padding: '8px 12px', fontSize: '1.15rem' }}
+          >
+            🔒
+          </button>
 
           <button className="btn btn-secondary" onClick={handleLogout} style={{ padding: '8px 14px' }}>
             🚪 ออก
