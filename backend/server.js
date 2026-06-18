@@ -611,7 +611,8 @@ const createMailTransporter = () => {
   if (!user || !pass) return null;
   return nodemailer.createTransport({
     service: 'gmail',
-    auth: { user, pass }
+    auth: { user, pass },
+    family: 4 // บังคับใช้งาน IPv4 เพื่อป้องกันปัญหา Network Unreachable (ENETUNREACH) บนระบบ Render
   });
 };
 
