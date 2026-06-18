@@ -1119,6 +1119,7 @@ app.post('/api/auth/update-email', authenticateToken, async (req, res) => {
 
 // Test Email SMTP Configuration
 app.post('/api/auth/test-email', authenticateToken, async (req, res) => {
+  let diagnostic = 'Not run';
   try {
     const users = await db.getUsers();
     const user = users.find(u => u.id === req.user.id);
@@ -1128,6 +1129,30 @@ app.post('/api/auth/test-email', authenticateToken, async (req, res) => {
     if (!email || !email.includes('@') || email.endsWith('.local')) {
       return res.status(400).json({ message: 'กรุณาตั้งค่าอีเมลของคุณให้เป็นอีเมลจริงก่อนทำการทดสอบ' });
     }
+
+    // Run connection diagnostics
+    diagnostic = await new Promise((resolve) => {
+      dns.lookup('smtp.gmail.com', { family: 4 }, (dnsErr, address) => {
+        if (dnsErr) {
+          return resolve(`DNS lookup failed: ${dnsErr.message}`);
+        }
+        const socket = new require('net').Socket();
+        socket.setTimeout(5000);
+        socket.connect(465, address, () => {
+          socket.destroy();
+          resolve(`Successfully connected to smtp.gmail.com (${address}) on port 465`);
+        });
+        socket.on('error', (connectErr) => {
+          socket.destroy();
+          resolve(`Failed to connect to smtp.gmail.com (${address}) on port 465: ${connectErr.message}`);
+        });
+        socket.on('timeout', () => {
+          socket.destroy();
+          resolve(`Timeout connecting to smtp.gmail.com (${address}) on port 465`);
+        });
+      });
+    });
+    console.log('SMTP connection diagnostic result:', diagnostic);
 
     const transporter = createMailTransporter();
     if (!transporter) {
@@ -1163,7 +1188,7 @@ app.post('/api/auth/test-email', authenticateToken, async (req, res) => {
     res.json({ message: 'ส่งอีเมลทดสอบไปยังกล่องจดหมายของคุณเรียบร้อยแล้ว!' });
   } catch (err) {
     console.error('Test email sending failed:', err);
-    res.status(500).json({ message: `การส่งอีเมลล้มเหลว (v3): ${err.message}` });
+    res.status(500).json({ message: `การส่งอีเมลล้มเหลว (v4): ${err.message}. [Diagnostic: ${diagnostic}]` });
   }
 });
 
