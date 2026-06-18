@@ -714,8 +714,7 @@ const generateCancelICS = (booking, carModel) => {
 const sendApprovalEmail = async (toEmail, toName, booking, carModel, approvedBy, driver, notes) => {
   const transporter = createMailTransporter();
   if (!transporter) {
-    console.log('Email not configured: GMAIL_USER or GMAIL_APP_PASSWORD missing');
-    return;
+    return { success: false, error: 'Email not configured: GMAIL_USER or GMAIL_APP_PASSWORD missing' };
   }
   const icsContent = generateICS(booking, carModel, approvedBy, driver);
   const startStr = formatThaiDateTime(booking.startTime);
@@ -760,15 +759,19 @@ const sendApprovalEmail = async (toEmail, toName, booking, carModel, approvedBy,
       }]
     });
     console.log(`Approval email sent to ${toEmail}`);
+    return { success: true };
   } catch (err) {
     console.error('Failed to send approval email:', err.message);
+    return { success: false, error: err.message };
   }
 };
 
 // Send rejection/cancellation email
 const sendRejectionEmail = async (toEmail, toName, booking, carModel, reason, actionBy) => {
   const transporter = createMailTransporter();
-  if (!transporter) return;
+  if (!transporter) {
+    return { success: false, error: 'Email not configured: GMAIL_USER or GMAIL_APP_PASSWORD missing' };
+  }
   const icsContent = generateCancelICS(booking, carModel);
   const startStr = formatThaiDateTime(booking.startTime);
   const html = `
@@ -805,8 +808,10 @@ const sendRejectionEmail = async (toEmail, toName, booking, carModel, reason, ac
       }]
     });
     console.log(`Rejection email sent to ${toEmail}`);
+    return { success: true };
   } catch (err) {
     console.error('Failed to send rejection email:', err.message);
+    return { success: false, error: err.message };
   }
 };
 
@@ -1562,10 +1567,11 @@ app.post('/api/bookings/:id/approve', authenticateToken, requireRole(['admin', '
     const users = await db.getUsers();
     const targetUser = users.find(u => u.id === booking.userId);
 
+    let emailResult = null;
     if (targetUser) {
       // Send approval email with ICS calendar attachment
       const carModel = car ? `${car.model} (${car.color})` : 'รถยนต์';
-      await sendApprovalEmail(
+      emailResult = await sendApprovalEmail(
         targetUser.email,
         targetUser.name,
         booking,
@@ -1574,6 +1580,10 @@ app.post('/api/bookings/:id/approve', authenticateToken, requireRole(['admin', '
         finalDriver,
         noteText
       );
+    }
+
+    if (emailResult && !emailResult.success) {
+      return res.json({ message: `อนุมัติการจองสำเร็จแล้ว (แต่ส่งเมลล้มเหลว: ${emailResult.error})` });
     }
 
     res.json({ message: 'อนุมัติการจองรถยนต์เรียบร้อยแล้ว' });
@@ -1603,10 +1613,11 @@ app.post('/api/bookings/:id/reject', authenticateToken, requireRole(['admin', 's
     const users = await db.getUsers();
     const targetUser = users.find(u => u.id === booking.userId);
 
+    let emailResult = null;
     if (targetUser) {
       // Send rejection email with cancel ICS attachment
       const carModel = car ? `${car.model} (${car.color})` : 'รถยนต์';
-      await sendRejectionEmail(
+      emailResult = await sendRejectionEmail(
         targetUser.email,
         targetUser.name,
         booking,
@@ -1614,6 +1625,10 @@ app.post('/api/bookings/:id/reject', authenticateToken, requireRole(['admin', 's
         notes,
         req.user.name
       );
+    }
+
+    if (emailResult && !emailResult.success) {
+      return res.json({ message: `ปฏิเสธคำขอสำเร็จแล้ว (แต่ส่งเมลล้มเหลว: ${emailResult.error})` });
     }
 
     res.json({ message: 'ปฏิเสธการจองรถยนต์เรียบร้อยแล้ว' });
